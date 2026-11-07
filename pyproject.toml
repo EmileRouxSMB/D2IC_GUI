@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "D2IC-GUI"
+version = "0.1.0"
+description = "Interface locale scientifique DIC et thermique"
+requires-python = ">=3.12"
+dependencies = [
+  "D2IC", "DICTHFusion", "im-jax", "opencv-python-headless>=4.8",
+  "fastapi", "uvicorn", "tomli-w", "tifffile", "Pillow", "imageio",
+]
+
+[tool.setuptools]
+packages = ["D2IC_GUI"]
+
+[tool.setuptools.package-dir]
+D2IC_GUI = "."
+
+[tool.setuptools.package-data]
+D2IC_GUI = ["static/*.html", "static/*.css", "static/*.js"]

@@ -1,0 +1,67 @@
+[project]
+version = 1
+mode = "dic_thermal"
+name = "Nouvelle étude"
+[paths]
+visible_dir = ""
+reference_image = ""
+visible_pattern = "*.tif"
+output_dir = "runs"
+[roi]
+initial_mask = "roi/mask_initial.tif"
+final_mask = "roi/mask_final.tif"
+operation = "none"
+radius_px = 0
+kernel = "disk"
+[mesh]
+element_size_px = 15.0
+remove_islands = true
+min_island_area_px = 64
+[dic]
+image_stride = 1
+image_binning = 1
+# Pixels VIS d’origine ; critère photométrique seulement, maillage inchangé.
+roi_erosion_px = 0.0
+max_iters = 400
+tol = 0.01
+reg_strength = 0.01
+regularization = "elastic"
+strain_gauge_length = 80.0
+interpolation = "cubic"
+[scale]
+mm_per_pixel = 1.0
+method = "manual"
+confirmed = false
+segment_xy_px = []
+segment_length_mm = 0.0
+[time]
+visible_source = "filename"
+visible_frame_regex = "(\\d+)"
+visible_fps = 10.0
+[output]
+export_vtu = true
+export_pvd = true
+save_npz = true
+export_png = false
+paraview_length_unit = "px"
+series_name = "dic"
+[runtime]
+jax_preferred = "gpu"
+jax_fallback = "cpu"
+jax_enable_x64 = false
+[thermal]
+image_dir = ""
+image_pattern = "*.tif"
+unit = "degC"
+time_source = "filename"
+frame_regex = "(\\d+)"
+thermal_fps = 50.0
+[registration]
+file = "calibration/visible_thermal.json"
+approved = false
+[synchronization]
+method = "timestamps"
+visible_event_frame = 0
+thermal_event_frame = 0
+thermal_interpolation = "linear"
+thermal_offset_s = 0.0

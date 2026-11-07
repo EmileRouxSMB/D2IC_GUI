@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f7f5">
+  <title>D2IC — étude locale</title>
+  <link rel="stylesheet" href="/static/style.css?v=roi-shapes-1">
+  <script src="/static/image_zoom.js?v=image-zoom-1" defer></script>
+  <script src="/static/roi_shapes.js?v=roi-shapes-1" defer></script>
+  <script src="/static/app.js?v=roi-shapes-1" defer></script>
+</head>
+<body class="nav-collapsed">
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="D2IC accueil"><span class="brand-mark">D</span><span>D2IC</span></a>
+    <div class="file-menu">
+      <button type="button" id="file-menu-trigger" class="file-menu-trigger" aria-controls="file-menu-panel" aria-expanded="false" aria-haspopup="true">Fichier <span aria-hidden="true">⌄</span></button>
+      <div id="file-menu-panel" class="file-menu-panel" hidden>
+        <button type="button" id="new-study">Nouvelle étude</button>
+        <button type="button" id="open-study">Ouvrir…</button>
+        <div class="file-menu-separator" role="separator"></div>
+        <button type="button" id="save-study">Enregistrer <span>Ctrl+S</span></button>
+        <button type="button" id="save-as-study">Enregistrer sous…</button>
+        <button type="button" id="copy-study">Dupliquer l’étude…</button>
+        <div class="file-menu-separator" role="separator"></div>
+        <button type="button" id="relink-study">Relocaliser les images…</button>
+      </div>
+    </div>
+    <div class="project-head"><strong id="project-name">Nouvelle étude</strong><span id="save-state" class="save-state"><i></i>Connexion…</span><div class="mode-row"><label for="project-mode">Parcours</label><select id="project-mode"><option value="dic">DIC seule</option><option value="dic_thermal">DIC + thermique</option></select></div></div>
+    <div class="top-actions"><button class="icon-button recent-button" id="recent-runs" title="Runs récents" aria-label="Runs récents">◷</button><button class="icon-button mobile-nav" id="nav-toggle" title="Navigation" aria-label="Ouvrir la navigation">☰</button></div>
+  </header>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Vues scientifiques">
+      <div class="sidebar-top"><button class="collapse-nav" id="collapse-nav" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Développer la navigation" title="Développer la navigation">‹</button><span>Navigation</span></div>
+      <div class="nav-caption">ÉTUDE</div>
+      <nav id="view-nav">
+        <button class="nav-item active" data-view="VIS" aria-label="Images VIS" title="Images VIS" aria-current="page"><span class="nav-icon">▧</span><span class="nav-label">VIS</span><span class="nav-state">•</span></button>
+        <button class="nav-item" data-view="ROI" aria-label="ROI et maillage" title="ROI et maillage"><span class="nav-icon">⬡</span><span class="nav-label">ROI / maillage</span><span class="nav-state">•</span></button>
+        <button class="nav-item" data-view="Échelle" aria-label="Échelle physique" title="Échelle physique"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 6v5m4-5v3m4-3v5m4-5v3"/></svg></span><span class="nav-label">Échelle</span><span class="nav-state">•</span></button>
+        <button class="nav-item" data-view="Réglages DIC" aria-label="Réglages DIC" title="Réglages DIC"><span class="nav-icon" aria-hidden="true">⚙</span><span class="nav-label">Réglages DIC</span><span class="nav-state">•</span></button>
+        <button class="nav-item thermal-nav" data-view="Thermique" aria-label="Thermique" title="Thermique"><span class="nav-icon">♨</span><span class="nav-label">Thermique</span><span class="nav-state">•</span></button>
+        <button class="nav-item thermal-nav" data-view="Synchro" aria-label="Synchro" title="Synchro"><span class="nav-icon">◷</span><span class="nav-label">Synchro</span><span class="nav-state">•</span></button>
+      </nav>
+      <div class="nav-caption results-caption">SORTIES</div>
+      <nav>
+        <button class="nav-item" data-view="Job Manager" aria-label="Job Manager" title="Job Manager"><span class="nav-icon">⌁</span><span class="nav-label">Job Manager</span><span class="nav-state">•</span></button>
+        <button class="nav-item" data-view="Résultats" aria-label="Résultats" title="Résultats"><span class="nav-icon">◫</span><span class="nav-label">Résultats</span><span class="nav-state">•</span></button>
+        <button class="nav-item" data-view="Export" aria-label="Export" title="Export"><span class="nav-icon">⇧</span><span class="nav-label">Export</span><span class="nav-state">•</span></button>
+      </nav>
+      <div class="sidebar-bottom"><span>Serveur local</span><span class="local-dot"></span></div>
+    </aside>
+    <main class="workspace" id="workspace">
+      <section class="canvas-pane" id="canvas-pane" aria-label="Espace de travail">
+        <div class="canvas-actions"><button class="button quiet" id="image-view">▣ <span>Image</span></button><button class="button quiet" id="parameters-view">☷ <span>Paramètres</span></button></div>
+        <div class="canvas-stage" id="canvas-stage">
+          <div class="stage-content" id="stage-content"><div class="empty-visual"><div class="image-glyph">▧</div><span class="eyebrow">ESPACE D’APERÇU</span><h2 id="stage-title">Aucune image chargée</h2><p id="stage-copy">Choisissez un dossier VIS dans les paramètres pour afficher la séquence.</p><button class="button outline" id="choose-images">Choisir le dossier VIS</button></div></div>
+          <div class="stage-footer"><span id="coordinate-readout">x — &nbsp; y —</span><span id="image-count">0 image</span></div>
+        </div>
+      </section>
+      <div class="splitter" id="splitter" role="separator" aria-label="Redimensionner le panneau des paramètres" aria-orientation="vertical" aria-valuemin="25" aria-valuemax="55" aria-valuenow="30" tabindex="0"><span></span></div>
+      <aside class="settings-pane" id="settings-pane" aria-label="Paramètres de la vue">
+        <div class="settings-head"><div><div class="eyebrow">CONFIGURATION</div><h2 id="settings-title">Projet VIS</h2></div><button type="button" class="collapse-settings" id="collapse-settings" aria-controls="settings-pane" aria-expanded="true" aria-label="Replier les paramètres" title="Replier les paramètres">›</button><button class="icon-button" id="close-settings" aria-label="Fermer les paramètres">×</button></div>
+        <div class="field-search"><span>⌕</span><input id="field-search" type="search" placeholder="Rechercher un paramètre" aria-label="Rechercher un paramètre"><kbd>⌘ K</kbd></div>
+        <div id="field-groups" class="field-groups"><div class="loading-state">Chargement du schéma…</div></div>
+        <div class="settings-foot"><span id="config-message">Les réglages sont enregistrés dans l’étude.</span><button class="button primary" id="save-config">Enregistrer les réglages</button></div>
+      </aside>
+    </main>
+  </div>
+  <div class="scrim" id="scrim"></div>
+  <dialog id="file-dialog" aria-labelledby="file-dialog-title">
+    <div class="file-dialog-head"><div><div class="eyebrow">FICHIERS LOCAUX</div><h2 id="file-dialog-title">Choisir un fichier</h2></div><button type="button" class="dialog-close" id="file-close" aria-label="Fermer">×</button></div>
+    <div class="file-path-row"><button type="button" class="button outline" id="file-up" title="Dossier parent" aria-label="Dossier parent">↑</button><input id="file-path" type="text" aria-label="Chemin du dossier"><button type="button" class="button outline" id="file-go">Aller</button></div>
+    <input id="file-search" type="search" placeholder="Rechercher dans ce dossier" aria-label="Rechercher dans ce dossier">
+    <div id="file-list" class="file-list" role="listbox" aria-label="Fichiers et dossiers"></div>
+    <button type="button" class="button quiet" id="file-more" hidden>Afficher la suite</button>
+    <div id="file-selection" class="file-selection">Choisissez un élément.</div>
+    <label id="file-name-row" class="file-name-row" hidden>Nom du nouveau dossier<input id="file-name" type="text" autocomplete="off" placeholder="Nom du dossier"></label>
+    <div class="file-dialog-actions"><button type="button" class="button quiet" id="file-cancel">Annuler</button><button type="button" class="button primary" id="file-choose" disabled>Sélectionner</button></div>
+  </dialog>
+  <dialog id="notice-dialog"><form method="dialog"><button class="dialog-close" aria-label="Fermer">×</button><div class="eyebrow">D2IC</div><h2 id="dialog-title">Information</h2><p id="dialog-copy"></p><button class="button primary">Fermer</button></form></dialog>
+</body>
+</html>
