@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from tempfile import TemporaryDirectory
 from functools import lru_cache
 import sys
 import traceback
@@ -119,11 +121,40 @@ def _rebuild_pvd(run, manifest):
     manifest['dic_vtu'] = [str(path.resolve()) for _, path in datasets]
 
 
+@contextmanager
+def _thermal_field_buffers(output, frame_count, node_count, element_count):
+    """Allocate disk-backed output arrays and release mappings on every exit.
+
+    The final NPZ schema is unchanged. Keeping contiguous NPY buffers on disk
+    avoids retaining all thermal states and stacking them again in RAM. Close
+    mappings explicitly before deleting temporary files, including on Windows.
+    """
+    layout = {
+        'temperature': (node_count, float),
+        'delta_temperature': (node_count, float),
+        'thermal_valid': (node_count, bool),
+        'temperature_element': (element_count, float),
+        'delta_temperature_element': (element_count, float),
+        'thermal_valid_element': (element_count, bool),
+    }
+    with TemporaryDirectory(prefix='.thermal-fields-', dir=output) as temporary:
+        buffers = {}
+        try:
+            for name, (count, dtype) in layout.items():
+                buffers[name] = np.lib.format.open_memmap(
+                    Path(temporary) / f'{name}.npy', mode='w+', dtype=dtype,
+                    shape=(frame_count, count))
+            yield buffers
+        finally:
+            for buffer in buffers.values():
+                buffer._mmap.close()
+
+
 def _fuse_thermal(run, manifest):
     """Project transported DIC material points into approved TH acquisitions."""
     from .project import load_project
     from .imaging import read_image
-    from .thermal import align_thermal_times, fuse_thermal_sequence, write_thermal_vtu, write_thermal_pvd
+    from .thermal import align_thermal_times, iter_thermal_sequence, write_thermal_vtu, write_thermal_pvd
     from DICTHFusion.registration import load_registration
     import hashlib
 
@@ -165,55 +196,84 @@ def _fuse_thermal(run, manifest):
     dic = open_result_store(source if source.is_dir() else run/'results'/'dic_results.npz')
     mesh = dic.read_mesh()
     nodes, elements = mesh['nodes_xy'], mesh['elements']
-    u = np.concatenate([np.zeros((1,len(nodes),2)), dic.read_history('u_nodal')], axis=0)
-    strain = np.concatenate([np.zeros((1,len(nodes),3)), dic.read_history('strain')], axis=0)
-    states = fuse_thermal_sequence(
+    @lru_cache(maxsize=1)
+    def dic_frame(index):
+        if index == 0:
+            return {'u_nodal': np.zeros((len(nodes), 2)),
+                    'strain': np.zeros((len(nodes), 3))}
+        return dic.read_frame(index - 1)
+
+    class Displacements:
+        def __len__(self):
+            return len(vis_rows)
+
+        def __getitem__(self, index):
+            if not 0 <= index < len(vis_rows):
+                raise IndexError(index)
+            return dic_frame(index)['u_nodal']
+
+    states = iter_thermal_sequence(
         [row['time_s'] for row in vis_rows], aligned, th_frames,
-        thermal_images, nodes, u, elements, matrix,
+        thermal_images, nodes, Displacements(), elements, matrix,
         thermal_fps=cfg['thermal']['thermal_fps'])
-    manifest['reference_temperature_available'] = bool(states[0]['time_valid'] and np.any(states[0]['thermal_valid']))
-    if not manifest['reference_temperature_available']:
-        manifest['reference_temperature_warning'] = 'T_ref indisponible au premier temps VIS ; Delta_temperature reste absent'
     output = run/'results'
-    np.savez_compressed(output/'thermal_fields.pending.npz',
-        temperature=np.stack([state['temperature'] for state in states]),
-        delta_temperature=np.stack([state['delta_temperature'] for state in states]),
-        thermal_valid=np.stack([state['thermal_valid'] for state in states]),
-        temperature_element=np.stack([state['temperature_element'] for state in states]),
-        delta_temperature_element=np.stack([state['delta_temperature_element'] for state in states]),
-        thermal_valid_element=np.stack([state['thermal_valid_element'] for state in states]))
-    (output/'thermal_fields.pending.npz').replace(output/'thermal_fields.npz')
-    manifest['thermal_npz'] = str((output/'thermal_fields.npz').resolve())
+    pending = output/'thermal_fields.pending.npz'
     datasets = []
     provenance = []
-    for k, state in enumerate(states):
-        left, right = state['left'], state['right']
-        entry = {'visible_path': vis_rows[k]['path'], 'time_s': state['time_s'],
-                 'thermal_left': th_rows[left]['path'] if left >= 0 else None,
-                 'thermal_right': th_rows[right]['path'] if right >= 0 else None,
-                 'thermal_left_time_s': float(aligned[left]) if left >= 0 else None,
-                 'thermal_right_time_s': float(aligned[right]) if right >= 0 else None,
-                 'alpha': state['alpha'] if state['time_valid'] else None,
-                 'time_valid': state['time_valid'], 'reason': state['reason'],
-                 'valid_nodes': int(np.count_nonzero(state['thermal_valid'])),
-                 'valid_elements': int(np.count_nonzero(state['thermal_valid_element']))}
-        provenance.append(entry)
-        if not state['time_valid'] or not cfg['output']['export_vtu']:
-            continue
-        path = output/f'coupled_{k:04d}.vtu'
-        write_thermal_vtu(path, nodes, elements, u[k], state, strain=strain[k],
-                          length_unit=manifest['length_unit'],
-                          mm_per_pixel=manifest['mm_per_pixel'],
-                          scale_confirmed=manifest['scale_confirmed'])
-        datasets.append((state['time_s'], path))
-    _verify_source_rows(th_rows)
+    try:
+        with _thermal_field_buffers(output, len(vis_rows), len(nodes), len(elements)) as buffers:
+            for k, state in enumerate(states):
+                if k == 0:
+                    reference_available = bool(state['time_valid'] and np.any(state['thermal_valid']))
+                    manifest['reference_temperature_available'] = reference_available
+                    if not reference_available:
+                        manifest['reference_temperature_warning'] = (
+                            'T_ref indisponible au premier temps VIS ; Delta_temperature reste absent')
+                for name, buffer in buffers.items():
+                    buffer[k] = state[name]
+
+                left, right = state['left'], state['right']
+                provenance.append({
+                    'visible_path': vis_rows[k]['path'], 'time_s': state['time_s'],
+                    'thermal_left': th_rows[left]['path'] if left >= 0 else None,
+                    'thermal_right': th_rows[right]['path'] if right >= 0 else None,
+                    'thermal_left_time_s': float(aligned[left]) if left >= 0 else None,
+                    'thermal_right_time_s': float(aligned[right]) if right >= 0 else None,
+                    'alpha': state['alpha'] if state['time_valid'] else None,
+                    'time_valid': state['time_valid'], 'reason': state['reason'],
+                    'valid_nodes': int(np.count_nonzero(state['thermal_valid'])),
+                    'valid_elements': int(np.count_nonzero(state['thermal_valid_element'])),
+                })
+                if not state['time_valid'] or not cfg['output']['export_vtu']:
+                    continue
+                record = dic_frame(k)
+                path = output/f'coupled_{k:04d}.vtu'
+                write_thermal_vtu(
+                    path, nodes, elements, record['u_nodal'], state,
+                    strain=np.asarray(record['strain'], dtype=float),
+                    length_unit=manifest['length_unit'],
+                    mm_per_pixel=manifest['mm_per_pixel'],
+                    scale_confirmed=manifest['scale_confirmed'])
+                datasets.append((state['time_s'], path))
+
+            _verify_source_rows(th_rows)
+            if datasets and cfg['output']['export_pvd']:
+                pvd = write_thermal_pvd(
+                    output/(cfg['output']['series_name']+'_coupled.pvd'), datasets)
+                manifest['coupled_pvd'] = str(pvd.resolve())
+            else:
+                manifest['coupled_pvd'] = None
+            # NumPy writes the contiguous memmaps into the ZIP by chunks;
+            # do not stack or copy them into full in-memory histories here.
+            np.savez_compressed(pending, **buffers)
+        pending.replace(output/'thermal_fields.npz')
+    finally:
+        pending.unlink(missing_ok=True)
+        dic_frame.cache_clear()
+        thermal_image.cache_clear()
+    manifest['thermal_npz'] = str((output/'thermal_fields.npz').resolve())
     manifest['thermal_provenance'] = provenance
     manifest['coupled_vtu'] = [str(path.resolve()) for _, path in datasets]
-    if datasets and cfg['output']['export_pvd']:
-        pvd = write_thermal_pvd(output/(cfg['output']['series_name']+'_coupled.pvd'), datasets)
-        manifest['coupled_pvd'] = str(pvd.resolve())
-    else:
-        manifest['coupled_pvd'] = None
 
 
 def run_worker(run):

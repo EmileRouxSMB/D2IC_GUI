@@ -34,6 +34,12 @@ Les images sont indexées `(y,x)`, les nœuds et déplacements sont `(x,y)` en p
 
 Une sortie en mm exige un étalonnage confirmé. D2IC garde le magasin en pixels ; les VTU en mm sont des fichiers distincts des VTU natifs afin de pouvoir reconstruire l'export sans multiplier deux fois les coordonnées. Les déformations restent sans dimension.
 
+## Mémoire de la fusion thermique
+
+Le worker consulte les déplacements et déformations DIC une image à la fois. `iter_thermal_sequence` conserve la référence thermique pour calculer `ΔT`, puis fournit chaque état au worker ; `fuse_thermal_sequence` reste disponible pour les consommateurs qui demandent une liste en mémoire.
+
+Les six tableaux thermiques sont assemblés dans des fichiers NPY temporaires mappés sur disque, sous `results/`, puis compressés dans le même `thermal_fields.npz`. Cela nécessite de l’espace disque temporaire proportionnel aux tableaux thermiques non compressés. Les mappings sont fermés et les fichiers temporaires supprimés après succès ou erreur. La publication remplace l’archive précédente seulement après réussite de la fusion, des exports demandés et de la compression. Les formats, unités, invalidités et conventions de référence restent ceux décrits ci-dessus.
+
 ## Écriture, reprise et compatibilité
 
 D2IC écrit une frame puis son checkpoint atomiquement. `progress.json` signale les images terminées ; une frame non validée par checkpoint n'est pas exposée. À la reprise, D2IC compare l'empreinte de la configuration, des images et du masque, puis vérifie le maillage avant de réutiliser un déplacement. Le GUI conserve les anciens runs et n'autorise la reprise que pour un état échoué ou annulé. La relocalisation d'une étude ne réécrit pas les chemins historiques des runs.

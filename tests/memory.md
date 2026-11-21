@@ -62,3 +62,6 @@ La régression binning dans `test_readiness.py` vérifie le refus sans création
 
 
 `test_readiness.py` couvre aussi le cycle préparer → ligne bloquée/prête → lancement explicite, les avertissements non bloquants, le snapshot inchangé après modification de l’étude, une source modifiée, une erreur de lecture complète, la préparation pendant un calcul, les changements simultanés de configuration/masque et la suppression concurrente au démarrage. `test_readiness.cjs` vérifie les routes séparées, les messages échappés dans chaque ligne et l’activation de Lancer selon `can_start`.
+
+
+`test_thermal_streaming.py` contrôle la consommation progressive des déplacements, les températures analytiques et invalidités, le format NPZ inchangé, les exports et la conservation d’une archive existante après une erreur de fusion ou de compression. `test_result_analysis.cjs` importe directement `result_analysis.js`, sans découpage textuel de `app.js`.
