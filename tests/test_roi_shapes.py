@@ -1,6 +1,8 @@
 """Pixel-center rasterization and draft ROI shape API contracts."""
 
 import base64
+import re
+import xml.etree.ElementTree as ET
 import cv2
 import numpy as np
 import pytest
@@ -11,6 +13,19 @@ from D2IC_GUI.imaging import mask_from_shapes, read_mask, save_mask
 from D2IC_GUI.project import create_project, load_project, save_project
 from D2IC_GUI.server import create_app
 from d2ic.io.app_utils import read_roi_mask
+
+
+def _svg_contour_bounds(data_url, shape_hw):
+    """Inspect native contour coordinates without treating an SVG as a PNG."""
+    assert data_url.startswith('data:image/svg+xml;base64,')
+    svg = ET.fromstring(base64.b64decode(data_url.split(',', 1)[1]))
+    height, width = shape_hw
+    assert svg.attrib['viewBox'] == f'0 0 {width} {height}'
+    assert (int(svg.attrib['height']), int(svg.attrib['width'])) == shape_hw
+    path = svg.find('{http://www.w3.org/2000/svg}path')
+    assert path is not None and path.attrib['fill-rule'] == 'evenodd'
+    points = np.asarray(re.findall(r'[ML] ([^ ]+) ([^ ]+)', path.attrib['d']), dtype=float)
+    return points.min(axis=0), points.max(axis=0)
 
 
 def _rectangle(operation='add', **coords):
@@ -101,13 +116,10 @@ def test_shape_preview_uses_native_roi_and_binned_photometric_pixels(tmp_path):
     assert result['area_px'] == 12 * 12
     assert result['correlation_pixels'] == 6 * 6
     assert result['photometric_error'] is None
-    roi_png = base64.b64decode(result['roi_data_url'].split(',', 1)[1])
-    roi = cv2.imdecode(np.frombuffer(roi_png, np.uint8), cv2.IMREAD_UNCHANGED)
-    assert roi.shape == (20, 24, 4) and roi[2, 2, 3] > 0 and roi[0, 0, 3] == 0
-    photo_png = base64.b64decode(result['photometric_data_url'].split(',', 1)[1])
-    photo = cv2.imdecode(np.frombuffer(photo_png, np.uint8), cv2.IMREAD_UNCHANGED)
-    assert photo.shape == (20, 24, 4) and photo[2, 2, 3] > 0
-    assert photo[0, 0, 3] == 0
+    for key in ('roi_data_url', 'photometric_data_url'):
+        low, high = _svg_contour_bounds(result[key], (20, 24))
+        np.testing.assert_array_equal(low, [2, 2])
+        np.testing.assert_array_equal(high, [13, 13])
 
     empty = client.post('/api/roi/shapes/preview', json={**body, 'shapes': []})
     assert empty.status_code == 200 and empty.json()['area_px'] == 0
@@ -188,10 +200,9 @@ def test_odd_image_photometry_excludes_incomplete_blocks_without_changing_roi(tm
     result = response.json()
     assert result['area_px'] == 25 and result['correlation_pixels'] == 4
     assert result['photometric_error'] is None
-    image = cv2.imdecode(np.frombuffer(base64.b64decode(
-        result['photometric_data_url'].split(',', 1)[1]), np.uint8), cv2.IMREAD_UNCHANGED)
-    assert image.shape == (5, 5, 4)
-    assert image[0, 0, 3] and not image[4, :, 3].any() and not image[:, 4, 3].any()
+    low, high = _svg_contour_bounds(result['photometric_data_url'], (5, 5))
+    np.testing.assert_array_equal(low, [0, 0])
+    np.testing.assert_array_equal(high, [3, 3])  # Incomplete edge blocks excluded.
     saved = client.post('/api/roi/shapes/save', json=body).json()
     layer = client.get('/api/roi/layer-image', params={
         'mask_path': saved['initial_mask_path'], 'visible_dir': str(visible),
@@ -199,4 +210,7 @@ def test_odd_image_photometry_excludes_incomplete_blocks_without_changing_roi(tm
         'remove_islands': False, 'roi_erosion_px': 0})
     assert layer.status_code == 200, layer.text
     imported = cv2.imdecode(np.frombuffer(layer.content, np.uint8), cv2.IMREAD_UNCHANGED)
-    np.testing.assert_array_equal(imported, image)
+    assert imported.shape == (5, 5, 4)
+    expected = np.zeros((5, 5), dtype=bool)
+    expected[:4, :4] = True
+    np.testing.assert_array_equal(imported[:, :, 3] > 0, expected)

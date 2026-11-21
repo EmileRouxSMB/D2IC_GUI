@@ -1,10 +1,10 @@
 # D2IC_GUI — spécification technique de la première application web
 
-**Statut :** proposition d'implémentation. **Référence scientifique :** [README.md](README.md). Cette spécification décrit le comportement attendu ; elle ne présente pas les fonctions à développer comme déjà disponibles.
+**Statut :** spécification de référence de l’application locale. **Référence scientifique :** [README.md](README.md). Ce document décrit les contrats attendus ; l’état de livraison et les limites de validation sont suivis dans [ROADMAP_DEV.md](ROADMAP_DEV.md). Le stockage courant est défini dans [RESULT_MODEL.md](RESULT_MODEL.md).
 
 ## 1. Périmètre et architecture
 
-La première version est une **application web locale** : un serveur Python écoute sur `127.0.0.1`, ouvre une page dans le navigateur et accède aux fichiers de l'expérience sur la machine où il tourne. Le calcul reste local, sur CPU ou GPU selon JAX. Python 3.11 ou plus récent est requis pour `tomllib`. Un déploiement réseau ou multiutilisateur nécessitera un modèle d'accès aux fichiers et d'authentification distinct.
+La première version est une **application web locale** : un serveur Python écoute sur `127.0.0.1`, ouvre une page dans le navigateur et accède aux fichiers de l'expérience sur la machine où il tourne. Le calcul reste local, sur CPU ou GPU selon JAX. Le paquet GUI requiert Python 3.12 ou plus récent, selon `pyproject.toml` ; `tomllib` assure la lecture TOML. Un déploiement réseau ou multiutilisateur nécessitera un modèle d'accès aux fichiers et d'authentification distinct.
 
 | Élément | Choix technique | Rôle |
 | --- | --- | --- |

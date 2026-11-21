@@ -1365,30 +1365,18 @@
       panel.innerHTML=`<div class="history-chart"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Historique de ${htmlEscape(field)} pour ${nodes.length} nœuds"><line x1="${p}" y1="${h-p}" x2="${w-p}" y2="${h-p}" stroke="#b6c4b9"/>${lines}</svg><div class="history-range"><span>${htmlEscape(xmin.toPrecision(4))}–${htmlEscape(xmax.toPrecision(4))} s</span><span>${htmlEscape(ymin.toPrecision(4))}–${htmlEscape(ymax.toPrecision(4))} ${htmlEscape(resultGraphUnit(field))}</span></div></div><div class="node-legend">${nodes.map((node,index)=>`<span><i style="background:${nodeColors[index%nodeColors.length]}"></i>Nœud ${node}</span>`).join('')}</div>`;
     }catch(error){if(request===historyRequest)panel.textContent=`Historique indisponible : ${error.message}`;}
   }
-  function mapMeshPoint(point,source,target){
-    // Invert/transport the same affine triangles used by the field renderer.
-    for(const cell of source.elements||[]){
-      const triangles=cell.length===3?[cell]:[[cell[0],cell[1],cell[2]],[cell[0],cell[2],cell[3]]];
-      for(const ids of triangles){
-        const [a,b,c]=ids.map(index=>source.nodes_xy[index]);
-        const det=(b[1]-c[1])*(a[0]-c[0])+(c[0]-b[0])*(a[1]-c[1]);
-        if(Math.abs(det)<1e-14)continue;
-        const u=((b[1]-c[1])*(point[0]-c[0])+(c[0]-b[0])*(point[1]-c[1]))/det;
-        const v=((c[1]-a[1])*(point[0]-c[0])+(a[0]-c[0])*(point[1]-c[1]))/det,w=1-u-v;
-        if(Math.min(u,v,w)>=-1e-9)return [0,1].map(axis=>u*target.nodes_xy[ids[0]][axis]+v*target.nodes_xy[ids[1]][axis]+w*target.nodes_xy[ids[2]][axis]);
-      }
-    }
-    return null;
-  }
+  const {mapMeshPoint} = window.D2ICResultAnalysis;
   function resultGraphUnit(field){
     return field.startsWith('u')?resultMetadata.length_unit:field.startsWith('E')?'sans unité':resultMetadata.temperature_unit||'';
   }
-  function sectionParameters(id,scope='image'){
-    const points=resultSections.get(id)||[],samples=Number($('#section-samples').value);
-    if(points.length!==2)throw new Error('Placez les deux extrémités sur le maillage.');
-    if(Math.hypot(points[1][0]-points[0][0],points[1][1]-points[0][1])<1e-9)throw new Error('Les extrémités doivent être distinctes.');
-    if(!Number.isInteger(samples)||samples<2||samples>2000)throw new Error('Choisissez entre 2 et 2000 échantillons.');
-    return new URLSearchParams({field:$('#history-field').value,frame:$('#run-frame').value,x0:points[0][0],y0:points[0][1],x1:points[1][0],y1:points[1][1],samples,scope});
+  function sectionParameters(id, scope = 'image') {
+    return window.D2ICResultAnalysis.sectionParameters({
+      points: resultSections.get(id) || [],
+      samples: $('#section-samples').value,
+      field: $('#history-field').value,
+      frame: $('#run-frame').value,
+      scope
+    });
   }
   function updateAnalysisGraphs(id){
     updateHistoryGraph(id,$('#history-field').value);
@@ -1577,6 +1565,19 @@
     const issues=[...required.map(item=>`<li class="run-preparation-error">Erreur · ${htmlEscape(item.view)} : ${htmlEscape(item.message)}</li>`),...optional.map(item=>`<li class="run-preparation-warning">Avertissement · ${htmlEscape(item.view)} : ${htmlEscape(item.message)}</li>`),runtimeError].join('');
     return issues?`<ul class="run-preparation">${issues}</ul>`:'';
   }
+  function renderRunRow(run) {
+    const id = run.id || run.run_id || run.name;
+    const active = id === state.selectedRun;
+    const runState = run.state || run.status || 'pending';
+    const labels = {
+      pending: 'Prêt', preparing: 'Préparation', blocked: 'Erreur de préparation',
+      running: 'En cours', completed: 'Terminé', failed: 'Échec', cancelled: 'Arrêté'
+    };
+    const stateLabel = labels[runState] || runState;
+    const count = run.total_frames ? ` · ${run.completed_frames || 0}/${run.total_frames} images` : '';
+    const available = Boolean(run.results_available || run.completed_frames > 0 || runState === 'completed');
+    return `<div class="run-row ${active?'selected':''}" data-run-id="${htmlEscape(id)}"><button type="button" class="run-select" aria-pressed="${active}" aria-label="Afficher l’état du run ${htmlEscape(id)}"><strong>${htmlEscape(id)}</strong><small>${htmlEscape(stateLabel+count)} · ${htmlEscape(run.updated_utc||'')}</small></button><div class="run-actions"><button type="button" class="button primary" data-run-start ${run.can_start?'':'disabled'}>Lancer</button><button type="button" class="button outline" data-run-action="stop" ${runState==='running'?'':'disabled'}>Stop</button><button type="button" class="button outline" data-run-action="restart" ${['failed','cancelled'].includes(runState)?'':'disabled'}>Redémarrer</button><button type="button" class="button outline danger" data-run-action="delete" ${['preparing','running'].includes(runState)?'disabled':''}>Supprimer</button><button type="button" class="button outline" data-run-result ${available?'':'disabled title="Résultats disponibles après la première image validée"'}>Résultats</button></div>${renderRunPreparation(run)}</div>`;
+  }
   async function populateRuns(){
     const host=$('#run-list');if(!host)return;
     if(runListTimer){clearTimeout(runListTimer);runListTimer=null;}
@@ -1587,7 +1588,7 @@
       if(!runs.length){host.innerHTML='<div class="empty-inline">Aucun job dans cette étude.</div>';rememberRun(null);$('#run-status').textContent='Préparez un job pour vérifier les prérequis et créer sa ligne.';return;}
       const preferred=state.selectedRun||localStorage.getItem(selectedRunStorageKey());if(preferred&&!state.selectedRun)rememberRun(preferred);
       if(preferred&&!runs.some(run=>run.id===preferred))rememberRun(null);
-      host.innerHTML=runs.map(run=>{const id=run.id||run.run_id||run.name,active=id===state.selectedRun,runState=run.state||run.status||'pending';const stateLabel={pending:'Prêt',preparing:'Préparation',blocked:'Erreur de préparation',running:'En cours',completed:'Terminé',failed:'Échec',cancelled:'Arrêté'}[runState]||runState;const count=run.total_frames?` · ${run.completed_frames||0}/${run.total_frames} images`:'';const available=Boolean(run.results_available||run.completed_frames>0||runState==='completed');return `<div class="run-row ${active?'selected':''}" data-run-id="${htmlEscape(id)}"><button type="button" class="run-select" aria-pressed="${active}" aria-label="Afficher l’état du run ${htmlEscape(id)}"><strong>${htmlEscape(id)}</strong><small>${htmlEscape(stateLabel+count)} · ${htmlEscape(run.updated_utc||'')}</small></button><div class="run-actions"><button type="button" class="button primary" data-run-start ${run.can_start?'':'disabled'}>Lancer</button><button type="button" class="button outline" data-run-action="stop" ${runState==='running'?'':'disabled'}>Stop</button><button type="button" class="button outline" data-run-action="restart" ${['failed','cancelled'].includes(runState)?'':'disabled'}>Redémarrer</button><button type="button" class="button outline danger" data-run-action="delete" ${['preparing','running'].includes(runState)?'disabled':''}>Supprimer</button><button type="button" class="button outline" data-run-result ${available?'':'disabled title="Résultats disponibles après la première image validée"'}>Résultats</button></div>${renderRunPreparation(run)}</div>`;}).join('');
+      host.innerHTML = runs.map(renderRunRow).join('');
       host.querySelectorAll('.run-select').forEach(button=>button.addEventListener('click',()=>{const id=button.closest('.run-row').dataset.runId;rememberRun(id);host.querySelectorAll('.run-row').forEach(row=>{row.classList.toggle('selected',row.dataset.runId===id);row.querySelector('.run-select').setAttribute('aria-pressed',String(row.dataset.runId===id));});const run=runs.find(row=>row.id===id);if(run)renderRunSummary(run);}));
       host.querySelectorAll('[data-run-result]').forEach(button=>button.addEventListener('click',()=>{rememberRun(button.closest('.run-row').dataset.runId);selectView('Résultats');}));
       host.querySelectorAll('[data-run-start]').forEach(button=>button.addEventListener('click',()=>launchRun(button.closest('.run-row').dataset.runId)));

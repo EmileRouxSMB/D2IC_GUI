@@ -91,12 +91,12 @@ Elle est évaluée par quadrature sur le maillage DIC, en transportant chaque po
 
 L’utilisateur charge un masque binaire TIFF ou PNG défini dans les pixels de l’image VIS de référence. La vue ROI affiche immédiatement ce masque en surimpression sur la VIS, même avant l’enregistrement de l’étude. Le masque doit avoir les mêmes dimensions que la VIS et contenir au moins un pixel actif.
 
-Le panneau droit expose le fichier ROI et la taille d’élément en pixels VIS. Le bouton **Mailler** enregistre une copie du masque dans l’étude, génère le maillage DIC à partir de ce masque puis montre ses éléments sur l’image VIS. Les TIFF gris avec canal alpha sont acceptés : le canal gris définit le masque, comme dans D2IC. Le fichier source n’est pas modifié. Un changement de fichier ROI ou de taille de maille impose de générer à nouveau le maillage. Les anciens paramètres morphologiques des fichiers `config.toml` restent lisibles, mais aucune dilatation, érosion ou édition par dessin n’est proposée dans cette interface.
+Le panneau droit expose le fichier ROI et la taille d’élément en pixels VIS. Le bouton **Mailler** enregistre une copie du masque dans l’étude, génère le maillage DIC à partir de ce masque puis montre ses éléments sur l’image VIS. Les TIFF gris avec canal alpha sont acceptés : le canal gris définit le masque, comme dans D2IC. Le fichier source n’est pas modifié. Un changement de fichier ROI ou de taille de maille impose de générer à nouveau le maillage. Les outils Rectangle/Ellipse permettent aussi de créer un nouveau masque, selon [Dessiner une ROI](#dessiner-une-roi). Les anciens paramètres morphologiques des fichiers `config.toml` restent lus et appliqués pour compatibilité ; ils ne constituent pas des outils d’édition supplémentaires dans le panneau courant.
 
 ## Parcours 1 — DIC seule
 
 1. **Créer un projet DIC** : choisir l'image VIS de référence, la séquence déformée, les temps ou la cadence et le dossier de résultats ; contrôler dimensions et ordre des images.
-2. **Préparer la ROI** : charger un masque depuis un fichier TIFF ou PNG, le contrôler sur la VIS, choisir la taille des éléments puis cliquer sur Mailler.
+2. **Préparer la ROI** : charger un masque TIFF/PNG ou créer un masque avec les outils Rectangle/Ellipse, le contrôler sur la VIS, choisir la taille des éléments puis cliquer sur Mailler.
 3. **Configurer** : régler taille des éléments, initialisation, solveur, régularisation, critères d'arrêt et étalonnage pixel→mm par saisie ou segment de longueur connue ; visualiser le maillage sur l'image de référence.
 4. **Calculer et contrôler** : lancer la DIC séquentielle ; examiner convergence, résidus photométriques, déplacements, déformations et zones non corrélées.
 5. **Explorer et exporter** : consulter cartes et historiques de `u` et `E`, puis exporter les données et la séquence ParaView.
@@ -157,7 +157,7 @@ Le parcours DIC seul doit retrouver une translation rigide connue sans déformat
 
 ## Développement du GUI
 
-La [feuille de route](ROADMAP_DEV.md) suit les jalons et leurs preuves de validation. Les profils d'agents du projet sont définis dans [`../.codex/agents/`](../.codex/agents/) et le [skill de développement](../.agents/skills/d2ic-gui-dev/SKILL.md) charge seulement le contexte utile au ticket en cours. Le modèle frugal est le défaut des sous-agents ; les revues scientifiques emploient un modèle plus capable.
+La [feuille de route](ROADMAP_DEV.md) suit les jalons et leurs preuves de validation. Le [routage des tâches de recherche](../.agents/skills/research-task-routing/SKILL.md) distingue implémentation locale et décision scientifique ou architecturale. Les rôles disponibles sont définis dans [`../.codex/agents/`](../.codex/agents/) ; leur configuration fait autorité pour les modèles employés.
 
 Le worker charge le paquet local `im_jax` avant D2IC quand le dépôt source est utilisé : l’interpolation VIS cubique par défaut reste disponible même si le paquet n’est pas installé en mode éditable. Un run échoué pour cette raison peut être relancé avec **Redémarrer** depuis Job Manager ; sa configuration figée est conservée.
 

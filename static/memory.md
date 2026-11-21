@@ -6,6 +6,8 @@ Contient la coque front-end locale de D2IC : structure de page, styles responsiv
 
 ## Fichiers importants
 
+- `result_analysis.js` : conversions entre maillages de référence/courant et paramètres de coupe, sans dépendance DOM ; interface navigateur et CommonJS pour les tests Node directs.
+
 - `index.html` : barre supérieure, navigation scientifique, espace de travail et panneau de configuration.
 - `style.css` : thème clair, navigation repliée par défaut, mise en page 70/30, séparateur, tables et dispositions étroites.
 - `image_zoom.js` : contrôles communs de zoom par clic ou rectangle, dézoom Ctrl/Cmd + clic et réinitialisation ; géométrie de l’image après transformation.

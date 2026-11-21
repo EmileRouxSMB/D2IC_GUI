@@ -13,6 +13,7 @@ from .dic_run import _time_of, worker_alive
 from .imaging import image_shape, inventory, morphology, read_mask, thermal_inventory
 from .project import resolve_path
 from .schema import validate
+from .roi import mesh_preview_identity, photometric_mask
 
 
 VIEWS = ("VIS", "ROI", "Échelle", "Réglages DIC", "Thermique", "Synchro",
@@ -145,19 +146,11 @@ def evaluate_readiness(folder, config, *, check_active_run=True):
                                                   cfg["roi"]["radius_px"])
                     if not np.array_equal(mask, expected_mask):
                         raise ValueError("Masque final périmé après modification de l’opération ou du rayon ROI")
-                from d2ic.io.app_utils import erode_correlation_roi
-                from d2ic.io.binning import bin_mask
-                from d2ic.mesh.generation import _remove_small_components
-                observation_mask = mask
-                if cfg["mesh"]["remove_islands"]:
-                    observation_mask = _remove_small_components(
-                        observation_mask, cfg["mesh"]["min_island_area_px"])
-                factor = cfg["dic"]["image_binning"]
-                observation_mask = bin_mask(observation_mask, factor)
-                height, width = ref["shape"]
-                observation_mask = observation_mask[:height // factor, :width // factor]
-                erode_correlation_roi(observation_mask, cfg["dic"]["roi_erosion_px"],
-                                      image_binning=factor)
+                photometric_mask(
+                    mask, image_binning=cfg["dic"]["image_binning"],
+                    roi_erosion_px=cfg["dic"]["roi_erosion_px"],
+                    remove_islands=cfg["mesh"]["remove_islands"],
+                    min_island_area_px=cfg["mesh"]["min_island_area_px"])
             except Exception as error:
                 messages["ROI"]["required"].append(str(error))
 
@@ -166,19 +159,11 @@ def evaluate_readiness(folder, config, *, check_active_run=True):
             try:
                 preview = folder / "roi" / "mesh_preview.png"
                 meta_path = folder / "roi" / "mesh_preview.json"
-                source_mask = resolve_path(folder, cfg["roi"]["initial_mask"])
                 final_mask = resolve_path(folder, cfg["roi"]["final_mask"])
                 if not preview.is_file() or not meta_path.is_file() or not final_mask.is_file():
                     raise ValueError("Aperçu du maillage absent ; générer et inspecter le maillage")
                 meta = json.loads(meta_path.read_text())
-                expected = {
-                    "mask_sha256": hashlib.sha256(final_mask.read_bytes()).hexdigest(),
-                    "source_mask_sha256": hashlib.sha256(source_mask.read_bytes()).hexdigest() if source_mask.is_file() else None,
-                    "element_size_px": cfg["mesh"]["element_size_px"],
-                    "image_binning": cfg["dic"]["image_binning"],
-                    "remove_islands": cfg["mesh"]["remove_islands"],
-                    "min_island_area_px": cfg["mesh"]["min_island_area_px"],
-                }
+                expected = mesh_preview_identity(folder, cfg)
                 if meta.get("image_binning") != expected["image_binning"]:
                     raise ValueError(
                         f"Aperçu du maillage périmé : binning {meta.get('image_binning')} → "

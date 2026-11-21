@@ -27,9 +27,12 @@ from .imaging import (discover_visible_series, image_shape, inventory, mask_from
                       morphology, read_image, read_mask, save_mask, thermal_inventory)
 from .project import copy_project, create_project, load_project, relink_sources, resolve_path, save_project
 from .readiness import evaluate_readiness
+from .roi import mesh_preview_identity, native_photometric_mask, photometric_mask
 from .schema import SCHEMA_VERSION, THERMAL_SECTIONS, defaults, describe_fields, validate
 from .thermal import align_thermal_times, thermal_brackets
-from d2ic.io.result_store import open_result_store
+from .results import (_transport_reference_raster, result_nodes, result_store,
+                      run_field_values, run_histories_payload, section_payload,
+                      visible_shape, visible_source)
 
 STATIC = Path(__file__).parent/'static'
 
@@ -106,36 +109,6 @@ def _mesh_vector_svg(nodes, elements, height, width, edge_width=0.2):
             'stroke-linecap="round" stroke-linejoin="round"/></svg>')
 
 
-def _transport_reference_raster(array, reference_nodes, current_nodes, triangles, shape_hw, binning):
-    """Transport a reference-grid scalar map to current VIS pixel centres.
-
-    Invert the piecewise affine FE map on deformed triangles. Nearest-neighbour
-    sampling preserves stored residual values and their NaN support. Row blocks
-    bound the temporary memory used for full-resolution visualization.
-    """
-    import matplotlib.tri as tri
-    height, width = shape_hw
-    triangulation = tri.Triangulation(current_nodes[:, 0], current_nodes[:, 1], triangles)
-    inverse_x = tri.LinearTriInterpolator(triangulation, reference_nodes[:, 0])
-    inverse_y = tri.LinearTriInterpolator(triangulation, reference_nodes[:, 1])
-    valid_source = np.isfinite(array).astype(np.uint8)
-    source = np.where(valid_source, array, 0).astype(np.float32)
-    result = np.full((height, width), np.nan, dtype=np.float32)
-    for start in range(0, height, 128):
-        stop = min(start + 128, height)
-        yy, xx = np.mgrid[start:stop, :width]
-        ref_x, ref_y = inverse_x(xx, yy), inverse_y(xx, yy)
-        valid = ~(np.ma.getmaskarray(ref_x) | np.ma.getmaskarray(ref_y))
-        map_x = ((ref_x.filled(-1e6) + .5) / binning - .5).astype(np.float32)
-        map_y = ((ref_y.filled(-1e6) + .5) / binning - .5).astype(np.float32)
-        values = cv2.remap(source, map_x, map_y, cv2.INTER_NEAREST,
-                           borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        support = cv2.remap(valid_source, map_x, map_y, cv2.INTER_NEAREST,
-                            borderMode=cv2.BORDER_CONSTANT, borderValue=0).astype(bool)
-        result[start:stop] = np.where(valid & support, values, np.nan)
-    return result
-
-
 def create_app(initial_folder=None):
     """Create the local FastAPI app, optionally opening an existing study."""
     app = FastAPI(title='D2IC_GUI')
@@ -165,10 +138,6 @@ def create_app(initial_folder=None):
         correlation_pixels = 0
         photo_error = None
         try:
-            from d2ic.io.app_utils import erode_correlation_roi
-            from d2ic.io.binning import bin_mask
-            from d2ic.mesh.generation import _remove_small_components
-
             erosion_px = float(body.get('roi_erosion_px', 0.0))
 
             def integer_option(key, default):
@@ -186,17 +155,12 @@ def create_app(initial_folder=None):
                 raise ValueError('Le rayon d’érosion photométrique doit être positif ou nul')
             if binning < 1 or min_area < 0:
                 raise ValueError('Binning et aire minimale d’îlot invalides')
-            if body.get('remove_islands', True):
-                mask = _remove_small_components(mask, min_area)
-            h, w = shape_hw[0] // binning, shape_hw[1] // binning
-            correlation = bin_mask(mask, binning)[:h, :w]
-            correlation = erode_correlation_roi(correlation, erosion_px,
-                                                image_binning=binning)
+            correlation = photometric_mask(
+                mask, image_binning=binning, roi_erosion_px=erosion_px,
+                remove_islands=body.get('remove_islands', True),
+                min_island_area_px=min_area)
             correlation_pixels = int(np.asarray(correlation, dtype=bool).sum())
-            native = np.zeros(shape_hw, dtype=bool)
-            native[:h * binning, :w * binning] = np.repeat(
-                np.repeat(correlation, binning, axis=0), binning, axis=1)
-            photo_mask = native
+            photo_mask = native_photometric_mask(correlation, shape_hw, binning)
         except (ValueError, TypeError, ImportError) as error:
             photo_error = str(error)
 
@@ -678,23 +642,12 @@ def create_app(initial_folder=None):
                 raise ValueError('Type de calque ROI inconnu')
             mask, _ = morphology(mask, operation, radius_px)
             if kind == 'photometric':
-                from d2ic.io.app_utils import erode_correlation_roi
-                from d2ic.io.binning import bin_mask
-                from d2ic.mesh.generation import _remove_small_components
-
-                # Same working mask and original-pixel radius as the solver.
                 if min_island_area_px < 0:
                     raise ValueError('L’aire minimale d’îlot doit être positive ou nulle')
-                if remove_islands:
-                    mask = _remove_small_components(mask, min_island_area_px)
-                working_mask = bin_mask(mask, image_binning)
-                h, w = shape[0] // image_binning, shape[1] // image_binning
-                working_mask = working_mask[:h, :w]
-                photo = erode_correlation_roi(working_mask,
-                    roi_erosion_px, image_binning=image_binning)
-                mask = np.zeros(shape, dtype=bool)
-                mask[:h * image_binning, :w * image_binning] = np.repeat(
-                    np.repeat(photo, image_binning, axis=0), image_binning, axis=1)
+                photo = photometric_mask(
+                    mask, image_binning=image_binning, roi_erosion_px=roi_erosion_px,
+                    remove_islands=remove_islands, min_island_area_px=min_island_area_px)
+                mask = native_photometric_mask(photo, shape, image_binning)
             layer = np.zeros((*shape, 4), dtype=np.uint8)
             layer[mask] = (210, 140, 35, 105) if kind == 'photometric' else (73, 155, 92, 88)
             contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_LIST,
@@ -731,22 +684,14 @@ def create_app(initial_folder=None):
                 raise ValueError('Type de calque ROI inconnu')
             mask, _ = morphology(mask, operation, radius_px)
             if kind == 'photometric':
-                from d2ic.io.app_utils import erode_correlation_roi
-                from d2ic.io.binning import bin_mask
-                from d2ic.mesh.generation import _remove_small_components
                 if isinstance(image_binning, bool) or image_binning < 1:
                     raise ValueError('Le binning doit être un entier positif')
                 if min_island_area_px < 0:
                     raise ValueError('L’aire minimale d’îlot doit être positive ou nulle')
-                if remove_islands:
-                    mask = _remove_small_components(mask, min_island_area_px)
-                h, w = shape[0] // image_binning, shape[1] // image_binning
-                reduced = bin_mask(mask, image_binning)[:h, :w]
-                reduced = erode_correlation_roi(reduced, roi_erosion_px,
-                                                image_binning=image_binning)
-                mask = np.zeros(shape, dtype=bool)
-                mask[:h * image_binning, :w * image_binning] = np.repeat(
-                    np.repeat(reduced, image_binning, axis=0), image_binning, axis=1)
+                reduced = photometric_mask(
+                    mask, image_binning=image_binning, roi_erosion_px=roi_erosion_px,
+                    remove_islands=remove_islands, min_island_area_px=min_island_area_px)
+                mask = native_photometric_mask(reduced, shape, image_binning)
                 color, fill, opacity = '#146ed2', '#238cd2', 0.41
             else:
                 color, fill, opacity = '#308c26', '#499b5c', 0.34
@@ -850,15 +795,8 @@ def create_app(initial_folder=None):
                 raise ValueError('Écriture du calque maillage impossible')
             mesh_svg = _mesh_vector_svg(nodes, cells, *gray.shape, edge_width=0.2)
             (folder/'roi'/'mesh_layer.svg').write_text(mesh_svg, encoding='utf-8')
-            digest=hashlib.sha256(mask_path.read_bytes()).hexdigest()
-            source_mask = resolve_path(folder, cfg['roi']['initial_mask'])
-            meta={'mask_sha256':digest,
-                  'source_mask_sha256': hashlib.sha256(source_mask.read_bytes()).hexdigest(),
-                  'nodes':len(nodes),'elements':len(cells),
-                  'element_size_px':cfg['mesh']['element_size_px'],
-                  'image_binning':cfg['dic']['image_binning'],
-                  'remove_islands':cfg['mesh']['remove_islands'],
-                  'min_island_area_px':cfg['mesh']['min_island_area_px']}
+            meta = mesh_preview_identity(folder, cfg, require_source=True)
+            meta.update({'nodes': len(nodes), 'elements': len(cells)})
             (folder/'roi'/'mesh_preview.json').write_text(json.dumps(meta,indent=2))
             return {**meta,'preview_url':'/api/mesh/preview-image',
                     'layer_url':'/api/mesh/layer-image',
@@ -874,13 +812,7 @@ def create_app(initial_folder=None):
             if not path.is_file() or not meta_path.is_file() or not mask.is_file():
                 raise ValueError('Aperçu maillage absent ou périmé')
             meta=json.loads(meta_path.read_text())
-            source_mask = resolve_path(folder, cfg['roi']['initial_mask'])
-            expected={'mask_sha256':hashlib.sha256(mask.read_bytes()).hexdigest(),
-                      'source_mask_sha256': hashlib.sha256(source_mask.read_bytes()).hexdigest() if source_mask.is_file() else None,
-                      'element_size_px':cfg['mesh']['element_size_px'],
-                      'image_binning':cfg['dic']['image_binning'],
-                      'remove_islands':cfg['mesh']['remove_islands'],
-                      'min_island_area_px':cfg['mesh']['min_island_area_px']}
+            expected = mesh_preview_identity(folder, cfg)
             if any(meta.get(key)!=value for key,value in expected.items()):
                 raise ValueError('Aperçu maillage périmé après modification du masque ou des paramètres')
             media_type = 'image/svg+xml' if path.suffix.lower() == '.svg' else 'image/png'
@@ -1093,93 +1025,6 @@ def create_app(initial_folder=None):
         with launch_lock:
             return guarded(act)
 
-    def result_store(run):
-        store = run/'results'/'dic_store'
-        if store.is_dir():
-            if not (store/'metadata.json').is_file() or not (store/'mesh.npz').is_file():
-                raise ValueError('Initialisation du calcul : aucun champ disponible pour le moment')
-            return open_result_store(store)
-        archive = run/'results'/'dic_results.npz'
-        if not archive.is_file():
-            raise ValueError('Initialisation du calcul : aucun champ disponible pour le moment')
-        return open_result_store(archive)
-
-    def visible_shape(manifest, store=None):
-        """Return the native VIS image shape in (height, width) pixels."""
-        shape = manifest.get('visible_reference', {}).get('shape')
-        if shape is None and store is not None:
-            shape = store.metadata.get('image_shape')
-        shape = np.asarray(shape)
-        if (shape.shape != (2,) or not np.issubdtype(shape.dtype, np.integer)
-                or np.any(shape <= 0)):
-            raise ValueError('Dimensions natives VIS absentes ou invalides dans le manifeste')
-        return int(shape[0]), int(shape[1])
-
-    def visible_source(run, manifest, frame):
-        """Resolve and verify the exact VIS source recorded for frame k."""
-        if frame < 0 or frame > len(manifest.get('visible_images', [])):
-            raise ValueError('Instant VIS hors de la séquence')
-        row = (manifest.get('visible_reference') if frame == 0
-               else manifest['visible_images'][frame - 1])
-        if not row or not row.get('path'):
-            raise ValueError('Source VIS absente du manifeste')
-        path = Path(row['path']).resolve()
-        if not path.is_file():
-            raise ValueError(f'Image VIS absente : {path}')
-        stat = path.stat()
-        if ('size' in row and stat.st_size != row['size']) or (
-                'mtime_ns' in row and stat.st_mtime_ns != row['mtime_ns']):
-            raise ValueError(f'Image VIS modifiée depuis le calcul : {path}')
-        return path
-
-    def result_nodes(manifest, store, mesh, frame, overlay):
-        """Return overlay coordinates in native VIS pixels, retaining raw u in pixels."""
-        if overlay not in ('none', 'reference', 'current'):
-            raise ValueError("overlay attendu : 'none', 'reference' ou 'current'")
-        nodes = np.asarray(mesh['nodes_xy'], dtype=float)
-        if overlay == 'none' or overlay == 'reference' or frame == 0:
-            return nodes
-        if frame < 0 or frame > store.frame_count:
-            raise ValueError('Instant VIS hors de la séquence')
-        record = store.read_frame(frame - 1)
-        displacement = np.asarray(record['u_nodal'], dtype=float)
-        if displacement.shape != nodes.shape or not np.isfinite(displacement).all():
-            raise ValueError('Déplacements nodaux invalides pour l’overlay courant')
-        # The stored displacement is in VIS pixels even when plotted values are in mm.
-        return nodes + displacement
-
-    def run_field_values(run, manifest, store, field, frame, mesh=None):
-        """Return nodal values in the units used by the result viewer."""
-        if field not in ('u1', 'u2', 'u_norm', 'E11', 'E22', 'E12', 'Residual',
-                         'Temperature', 'Delta_temperature', 'Temperature_element'):
-            raise ValueError(f'Champ inconnu : {field}')
-        if frame < 0 or frame > store.frame_count:
-            raise ValueError('Instant VIS hors de la séquence')
-        mesh = mesh if mesh is not None else store.read_mesh()
-        nodes = np.asarray(mesh['nodes_xy'])
-        elements = np.asarray(mesh['elements'])
-        record = {} if frame == 0 else store.read_frame(frame - 1)
-        if field == 'Residual':
-            if 'discrepancy_ref' not in record:
-                raise ValueError('Résidu indisponible pour cet instant')
-            return np.asarray(record['discrepancy_ref'])
-        if field in ('u1', 'u2', 'u_norm'):
-            u = np.zeros_like(nodes) if frame == 0 else np.asarray(record['u_nodal'])
-            values = u[:, 0] if field == 'u1' else u[:, 1] if field == 'u2' else np.linalg.norm(u, axis=1)
-            if manifest['length_unit'] == 'mm':
-                values = values * manifest['mm_per_pixel']
-            return values
-        if field in ('E11', 'E22', 'E12'):
-            strain = np.zeros((len(nodes), 3)) if frame == 0 else np.asarray(record['strain'])
-            return strain[:, ('E11', 'E22', 'E12').index(field)]
-        path = run/'results'/'thermal_fields.npz'
-        if not path.is_file():
-            raise ValueError('Champs thermiques absents de ce run')
-        with np.load(path, allow_pickle=False) as thermal:
-            if field == 'Temperature_element':
-                return np.asarray(thermal['temperature_element'][frame])
-            key = 'temperature' if field == 'Temperature' else 'delta_temperature'
-            return np.asarray(thermal[key][frame])
 
     def find_run(run_id):
         folder,cfg=current()
@@ -1415,96 +1260,12 @@ def create_app(initial_folder=None):
             return FileResponse(preview,media_type='image/png')
         return guarded(act)
 
-    def run_histories_payload(run_id, nodes):
-        """Read each stored frame and thermal archive once for selected VIS nodes."""
-        run=find_run(run_id)
-        status=inspect_run(run)
-        manifest=status['manifest']; store=result_store(run)
-        count=len(store.read_mesh()['nodes_xy'])
-        if not nodes or any(node<0 or node>=count for node in nodes):
-            raise ValueError('Indice de nœud hors maillage')
-        nodes=list(dict.fromkeys(nodes))
-        available = store.frame_count + 1
-        times=([manifest['visible_reference']['time_s']]+[row['time_s'] for row in manifest['visible_images']])[:available]
-        u=np.zeros((len(times),len(nodes),2)); strain=np.zeros((len(times),len(nodes),3))
-        if store.path.is_file():  # legacy monolithic NPZ: decompress each array once
-            u[1:]=store.read_history('u_nodal')[:,nodes]
-            strain[1:]=store.read_history('strain')[:,nodes]
-        else:
-            for frame in range(1,len(times)):
-                record=store.read_frame(frame-1)
-                u[frame]=np.asarray(record['u_nodal'])[nodes]
-                strain[frame]=np.asarray(record['strain'])[nodes]
-        thermal=None
-        path=run/'results'/'thermal_fields.npz'
-        if path.is_file():
-            with np.load(path,allow_pickle=False) as fields:
-                thermal=(np.asarray(fields['temperature'])[:,nodes],
-                         np.asarray(fields['delta_temperature'])[:,nodes])
-        scale=manifest['mm_per_pixel'] if manifest['length_unit']=='mm' else 1.
-        histories=[]
-        for j,node in enumerate(nodes):
-            rows=[]
-            for k,time in enumerate(times):
-                row={'time_s':time,'u1':float(u[k,j,0]*scale),'u2':float(u[k,j,1]*scale),
-                     'E11':float(strain[k,j,0]),'E22':float(strain[k,j,1]),
-                     'E12':float(strain[k,j,2])}
-                if thermal is not None:
-                    row['Temperature']=float(thermal[0][k,j]) if np.isfinite(thermal[0][k,j]) else None
-                    row['Delta_temperature']=float(thermal[1][k,j]) if np.isfinite(thermal[1][k,j]) else None
-                rows.append(row)
-            histories.append({'node':node,'history':rows})
-        return {'length_unit':manifest['length_unit'],
-                'temperature_unit':manifest.get('temperature_unit'),'histories':histories}
-
-    def section_payload(run_id, field, frame, x0, y0, x1, y1, samples, scope):
-        """Sample nodal fields on a material segment in reference VIS pixels.
-
-        Quadrilaterals use the viewer's 012/023 triangles; absent values remain
-        null. Distances use the run length unit, including its reference state.
-        """
-        endpoints=np.asarray([x0,y0,x1,y1],dtype=float)
-        if not np.isfinite(endpoints).all() or np.hypot(x1-x0,y1-y0)<=0:
-            raise ValueError('La coupe exige deux extrémités finies et distinctes')
-        if field not in ('u1','u2','u_norm','E11','E22','E12','Temperature','Delta_temperature'):
-            raise ValueError('Champ non pris en charge pour une coupe')
-        if scope not in ('image','sequence'): raise ValueError('Portée attendue : image ou sequence')
-        if samples < 2 or samples > 2000: raise ValueError('samples doit être compris entre 2 et 2000')
-        run=find_run(run_id); manifest=inspect_run(run)['manifest']; store=result_store(run); mesh=store.read_mesh()
-        nodes=np.asarray(mesh['nodes_xy'],dtype=float); elements=np.asarray(mesh['elements'],dtype=int)
-        triangles=elements if elements.shape[1]==3 else np.concatenate([elements[:,[0,1,2]],elements[:,[0,2,3]]])
-        px=np.linspace(float(x0),float(x1),samples); py=np.linspace(float(y0),float(y1),samples)
-        scale=float(manifest['mm_per_pixel']) if manifest['length_unit']=='mm' else 1.
-        distance=np.hypot(px-px[0],py-py[0])*scale
-        times=([manifest['visible_reference']['time_s']]+[row['time_s'] for row in manifest['visible_images']])[:store.frame_count+1]
-        frames=range(len(times)) if scope=='sequence' else (frame,)
-        if any(k<0 or k>=len(times) for k in frames): raise ValueError('Instant VIS hors de la séquence')
-        profiles=[]
-        for k in frames:
-            nodal=np.asarray(run_field_values(run,manifest,store,field,k,mesh),dtype=float)
-            vals=np.full(samples,np.nan)
-            for tri_nodes in triangles:
-                vertices=nodes[tri_nodes]; a,b,c=vertices
-                den=(b[1]-c[1])*(a[0]-c[0])+(c[0]-b[0])*(a[1]-c[1])
-                if abs(den)<1e-14: continue
-                candidates=np.flatnonzero(~np.isfinite(vals))
-                qx,qy=px[candidates],py[candidates]
-                w0=((b[1]-c[1])*(qx-c[0])+(c[0]-b[0])*(qy-c[1]))/den
-                w1=((c[1]-a[1])*(qx-c[0])+(a[0]-c[0])*(qy-c[1]))/den
-                w2=1-w0-w1; inside=(w0>=-1e-10)&(w1>=-1e-10)&(w2>=-1e-10)
-                valid=inside & np.isfinite(nodal[tri_nodes]).all()
-                if valid.any(): vals[candidates[valid]]=w0[valid]*nodal[tri_nodes[0]]+w1[valid]*nodal[tri_nodes[1]]+w2[valid]*nodal[tri_nodes[2]]
-            profiles.append({'frame':k,'time_s':float(times[k]),'distance':distance.tolist(),
-                             'values':[float(v) if np.isfinite(v) else None for v in vals]})
-        unit=(manifest.get('temperature_unit') if field in ('Temperature','Delta_temperature') else ('1' if field.startswith('E') else manifest['length_unit']))
-        return {'field':field,'length_unit':manifest['length_unit'],'temperature_unit':manifest.get('temperature_unit'),
-                'value_unit':unit,'profiles':profiles,'x_ref_px':px.tolist(),'y_ref_px':py.tolist()}
 
     @app.get('/api/runs/{run_id}/section')
     def run_section(run_id: str, field: str='u1', frame: int=0, x0: float=0, y0: float=0,
                     x1: float=1, y1: float=0, samples: int=200, scope: str='image'):
         def act():
-            payload=section_payload(run_id,field,frame,x0,y0,x1,y1,samples,scope)
+            payload=section_payload(find_run(run_id),field,frame,x0,y0,x1,y1,samples,scope)
             return {key:payload[key] for key in ('field','length_unit','temperature_unit','profiles')}
         return guarded(act)
 
@@ -1512,7 +1273,7 @@ def create_app(initial_folder=None):
     def run_section_csv(run_id: str, field: str='u1', frame: int=0, x0: float=0, y0: float=0,
                         x1: float=1, y1: float=0, samples: int=200, scope: str='image'):
         def act():
-            payload=section_payload(run_id,field,frame,x0,y0,x1,y1,samples,scope)
+            payload=section_payload(find_run(run_id),field,frame,x0,y0,x1,y1,samples,scope)
             output=io.StringIO(); unit=payload['value_unit']
             writer=csv.writer(output); writer.writerow(['frame','time_s',f"distance_{payload['length_unit']}",'x_ref_px','y_ref_px',f'{field}_{unit}'])
             for profile in payload['profiles']:
@@ -1526,7 +1287,7 @@ def create_app(initial_folder=None):
         def act():
             try: selected=[int(part) for part in nodes.split(',')]
             except ValueError as error: raise ValueError('Liste de nœuds invalide') from error
-            payload=run_histories_payload(run_id,selected)
+            payload=run_histories_payload(find_run(run_id),selected)
             if field not in ('u1','u2','u_norm','E11','E22','E12','Temperature','Delta_temperature'):
                 raise ValueError('Champ non pris en charge pour un historique')
             unit=(payload['temperature_unit'] if field in ('Temperature','Delta_temperature') else ('1' if field.startswith('E') else payload['length_unit']))
@@ -1543,13 +1304,13 @@ def create_app(initial_folder=None):
         def act():
             try: selected=[int(part) for part in nodes.split(',')]
             except ValueError as error: raise ValueError('Liste de nœuds invalide') from error
-            return run_histories_payload(run_id,selected)
+            return run_histories_payload(find_run(run_id),selected)
         return guarded(act)
 
     @app.get('/api/runs/{run_id}/history')
     def run_history(run_id: str, node: int=0):
         def act():
-            result=run_histories_payload(run_id,[node]); item=result['histories'][0]
+            result=run_histories_payload(find_run(run_id),[node]); item=result['histories'][0]
             return {'node':node,'length_unit':result['length_unit'],
                     'temperature_unit':result['temperature_unit'],'history':item['history']}
         return guarded(act)
