@@ -19,4 +19,4 @@ packages = ["D2IC_GUI"]
 D2IC_GUI = "."
 
 [tool.setuptools.package-data]
-D2IC_GUI = ["static/*.html", "static/*.css", "static/*.js"]
+D2IC_GUI = ["parameters.toml", "static/*.html", "static/*.css", "static/*.js"]

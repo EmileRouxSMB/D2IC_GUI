@@ -9,6 +9,7 @@ Contient la coque front-end locale de D2IC : structure de page, styles responsiv
 - `index.html` : barre supérieure, navigation scientifique, espace de travail et panneau de configuration.
 - `style.css` : thème clair, navigation repliée par défaut, mise en page 70/30, séparateur, tables et dispositions étroites.
 - `image_zoom.js` : contrôles communs de zoom par clic ou rectangle, dézoom Ctrl/Cmd + clic et réinitialisation ; géométrie de l’image après transformation.
+- `roi_mesh.js` : calque SVG natif des arêtes FE, rendu à 1 pixel écran avec `non-scaling-stroke`, synchronisé sur la géométrie VIS et les événements du zoom.
 - `app.js` : chargement des métadonnées et du projet, formulaires, aperçus de séquences, import de ROI, aperçu du maillage, appariement VIS–TH, exploration des champs et suivi de runs, ainsi que l’explorateur local de fichiers.
 
 ## Concepts physiques ou numériques
@@ -42,12 +43,12 @@ Le bandeau supérieur est limité à 46 px. Le menu Fichier regroupe les opérat
 
 La table VIS expose les cases Analyse et les actions 1/N, avant I, après I. Les exclusions vont dans `paths.excluded_images` (noms simples), et les changements marquent l’étude non enregistrée. La référence ne peut pas être désactivée.
 
-Job Manager rend les actions dans chaque ligne et garde le résumé du run sélectionné en haut. Un run terminé ouvre Résultats via son bouton dédié. La sélection est mémorisée par étude ; Supprimer exige une confirmation et Stop précède la suppression d’un run actif. Résultats utilise `/fields`, `/mesh`, `/field-image`, `/field-range` et `/history` pour une carte cadrée sur le maillage, les bornes cinématiques et les courbes de plusieurs nœuds. Les nœuds sont sélectionnés sur la carte avec clic et Maj + clic ; les historiques sont mis en cache dans la page, sans tableau numérique.
+Job Manager rend les actions dans chaque ligne et garde le résumé du run sélectionné en haut. Un run possédant des champs enregistrés ouvre Résultats via son bouton dédié, y compris pendant le calcul ou après interruption. La sélection est mémorisée par étude ; Supprimer exige une confirmation et Stop précède la suppression d’un run actif. Résultats utilise `/fields`, `/mesh`, `/field-image`, `/field-range` et `/history` pour une carte cadrée sur le maillage, les bornes cinématiques et les courbes de plusieurs nœuds. Les nœuds sont sélectionnés sur la carte avec clic et Maj + clic ; les historiques sont mis en cache dans la page, sans tableau numérique.
 
 La scène centrale n’a plus de `stage-grid` ni de cadre translucide. Les vues s’étendent jusqu’aux bords de la zone image ; la liste VIS/TH est étroite à grande largeur et passe sous l’image en conteneur étroit. Le pied de scène reste dans le DOM pour les mises à jour historiques mais est masqué. La vue Résultats sépare la carte entière et les courbes dans la hauteur disponible ; Job Manager possède sa propre liste de runs.
 
 
-Le conteneur ROI applique aussi par JavaScript `position: relative` et trois images `position: absolute; inset: 0; width/height: 100%; object-fit: contain`. Cette géométrie évite que les calques se placent en colonne si une ancienne feuille CSS est encore en cache. Les URL de `style.css` et `app.js` dans `index.html` portent une version lors des changements de rendu.
+Le rendu partagé applique les classes `scientific-image-frame` et `scientific-image-content` lors de `setupImageViews`. Le contenu est soit une image directe, soit la pile des calques ROI. Une seule règle CSS fixe leur rectangle sous la barre de zoom et utilise `object-fit: contain`. Les URL des actifs de `index.html` portent une version lors des changements de rendu.
 
 
 Les espacements verticaux des vues séquence et du panneau des paramètres sont resserrés : en-tête, recherche, sections, champs, cartes de séries et lignes de table. Les champs et cases gardent leur taille de commande. La version des actifs statiques dans `index.html` est incrémentée lors d’un changement CSS visible pour invalider le cache du navigateur.
@@ -71,3 +72,42 @@ Les vues d’images sont raccordées automatiquement à `D2ICImageZoom.attach` l
 
 
 `roi_shapes.js` gère les rectangles et ellipses en coordonnées VIS natives, y compris après zoom. Un brouillon contient une liste ordonnée de formes Ajouter/Retirer ; sa rastérisation et les calques ROI/photométrie passent par `/api/roi/shapes/preview`. `/api/roi/shapes/save` produit uniquement un nouveau TIFF 0/255 ; le formulaire pointe ensuite sur ce fichier et Mailler reprend les routes existantes. Le brouillon bloque le maillage tant que l’image ROI n’est pas créée. Aucun polygone n’est stocké dans le TOML.
+
+
+La recherche de paramètres et son raccourci Ctrl/Cmd+K sont supprimés ; la recherche dans l’explorateur de fichiers reste disponible. Les icônes de navigation reçoivent `data-readiness` (`inactive`, `warning`, `blocked`, `complete`) depuis `POST /api/readiness` sur le formulaire courant. Les couleurs et les libellés accessibles restent distincts de la sélection du volet. Les changements déclenchent un contrôle différé ; une réponse devenue obsolète après édition ou changement d’étude est ignorée. Une perte de connexion désactive le lancement.
+
+Job Manager désactive Lancer tant que `ready` est faux et propose « Étapes à compléter ». La fenêtre ouverte à la demande ne présente que les obligations, avec des liens vers leurs volets. Un clic sur Lancer contrôle puis sauvegarde et lance directement si les prérequis sont remplis, sans confirmation supplémentaire ni rappel facultatif. Un verrou empêche les doubles clics pendant le contrôle, la sauvegarde et le POST ; le serveur répète le contrôle. Les brouillons de formes ROI encore actifs bloquent le lancement dans le navigateur même après avoir changé de volet. Les snapshots de runs existants conservent leur propre configuration lors d’une reprise.
+
+Le bouton « Abandonner le dessin » permet de revenir au masque sauvegardé et de lever le blocage propre au brouillon ROI. La cadence VIS reste accessible dans Réglages DIC en DIC seule ; elle est placée dans Synchro pour le parcours couplé.
+
+Les états de préparation affichés utilisent gris (inactif), rouge (bloquant), vert (complété). Les avertissements facultatifs du rapport serveur sont affichés comme complétés sans rappel.
+
+
+Dans l’onglet ROI, les limites géométriques et photométriques sont servies comme chemins SVG aux dimensions VIS natives (`/api/roi/vector-layer`), y compris les brouillons dessinés. Le serveur fournit un chemin SVG composé d’arêtes uniques. Dans le navigateur, `roi_mesh.js` copie uniquement cette géométrie dans un SVG natif placé hors de la pile CSS transformée, avec un groupe aligné sur `D2ICImageZoom.geometry`. Les arêtes orange gardent une épaisseur de 1 pixel CSS via `vector-effect="non-scaling-stroke"` à tous les zooms et redimensionnements. La visibilité du SVG utilise explicitement l’attribut `hidden` (la propriété HTML `.hidden` ne s’applique pas au SVG). Le calque PNG historique reste disponible pour la prévisualisation composée et les anciennes intégrations. L’image VIS et les vecteurs ROI/photométrie partagent la pile positionnée et le même `object-fit: contain` ; le SVG maillage utilise la boîte VIS résultante dans le repère écran, en conservant les coordonnées natives et le cadrage.
+
+Les vues Images VIS et ROI ajustent l’image entière à une zone bornée (`object-fit: contain`). La liste VIS et les commandes/statuts ROI restent hors de cette zone pour ne masquer aucun pixel. Une bande de 42 px est réservée aux commandes de zoom ; la pile ROI et ses trois calques partagent le rectangle restant. Le reset zoom revient à `zoom=1` sans translation ; à ce niveau, un redimensionnement conserve automatiquement le cadrage complet. Sélectionner une autre image VIS réinitialise également le cadrage.
+
+
+VIS, ROI, Échelle et Réglages DIC utilisent le même cadrage, la même construction d’image (`imageMarkup`, avec identifiant optionnel), la même géométrie et le même contrôleur de zoom. La sélection des couches à transformer est centralisée dans `setupImageViews` : la pile ROI est transformée en bloc, les autres images directement. `image_zoom.js` écoute le chargement des images réelles, y compris dans une pile, et conserve le point matériel au centre du rectangle disponible lors d’un redimensionnement avec zoom ; la hauteur réservée à la barre de commandes est prise en compte. Le canvas du segment d’échelle continue à utiliser la géométrie commune en pixels VIS natifs.
+
+
+Résultats utilise également `data-image-stack` : la VIS source et le PNG RGBA du champ sont deux calques du même contenu, transformés ensemble par le contrôleur partagé. Le fond sélectionné est la VIS exacte de l’instant affiché (`/api/runs/{id}/visible-image?frame=k`), contrôlée contre le manifeste. Le champ et la sélection nodale utilisent les nœuds `X + u_k` en pixels VIS natifs, même si la valeur de déplacement est présentée en mm. Le curseur d’opacité (`0…1`, préférence locale) agit seulement sur le champ sans requête réseau ; Sans image masque le fond et conserve la configuration déformée. Les réponses devenues obsolètes après changement d’instant sont ignorées ; les géométries sont conservées en cache local par instant.
+
+`Residual` est nommé « Carte de résidu » et n’est proposé que si une carte enregistrée existe. `residual_frames` limite les instants sélectionnables aux cartes disponibles ; la référence sans carte est désactivée. Le résidu stocké dans le repère de référence est transporté par le maillage déformé pour son affichage courant. Les clics pour l’historique restent réservés aux champs nodaux. Un fond absent ou modifié est signalé et n’empêche pas l’affichage du champ.
+
+
+Le panneau est piloté par `parameters.toml` via `/api/schema` : `fieldView` utilise `view`, `view_dic`, `hidden` ; les groupes/ordres utilisent `group` et `order`. `controlFor` et `readControl` utilisent le type déclaré ; `array` avec `choices` produit un select multiple. Les types `file` et `directory` ouvrent l’explorateur, avec filtre `picker`. Aucune liste de clés ne limite les nouveaux paramètres ROI. Les réactions scientifiques et les panneaux spécialisés restent dans `app.js`.
+
+
+Le curseur commun passe immédiatement de `zoom-in` à `zoom-out` sur Ctrl/Cmd, même sans mouvement de souris. Les événements clavier du document et l’entrée/déplacement du pointeur synchronisent cette classe ; la perte de focus la réinitialise. Les images, canvas et SVG partagent le curseur ; la barre garde ses boutons utilisables. La destruction du contrôleur retire les écouteurs clavier/focus et la classe de dézoom. VIS, TH, ROI, Échelle, Réglages DIC, Correspondance, Synchro et Résultats passent tous par `setupImageViews` ; les calques métier restent spécifiques et utilisent la géométrie commune.
+
+
+Pendant un run actif, Résultats interroge `/fields` toutes les 1,5 s : seuls les temps validés sont ajoutés aux sélecteurs. Le champ, l’instant, les bornes, l’opacité et les nœuds sélectionnés sont conservés ; les historiques sont invalidés à chaque progression. Les champs thermiques sont ajoutés après publication de la fusion. L’en-tête distingue les résultats partiels des runs terminés.
+
+
+Résultats : le panneau d’analyse partage les sous-onglets Suivi de points / Coupe. Deux clics définissent les extrémités matérielles de la coupe : inversion barycentrique de la géométrie courante vers les pixels de référence, puis transport du segment pour le calque. Les profils sont interpolés côté serveur. Le slider conserve les indices VIS (référence 0), les résidus se calent sur un instant disponible. Les CSV téléchargent le champ choisi, tous les instants validés pour les points, image courante ou séquence pour la coupe. « Centrer sur 0 » symétrise les bornes et reste une préférence locale ; le fond, le zoom et l’opacité utilisent les mécanismes existants.
+
+
+Le résumé de préparation dans Job Manager affiche les messages obligatoires directement près du bouton Lancer, afin de rendre visible la cause de sa désactivation.
+
+Le Job Manager suit deux actions : « Préparer le job » sauvegarde les réglages modifiés puis appelle `/api/runs/prepare`, qui crée une ligne même si la préparation comporte des erreurs ; chaque ligne affiche ses erreurs et avertissements. Le bouton « Lancer » de la ligne est actif selon `can_start` et appelle `/api/runs/{id}/start`. Les avertissements seuls ne bloquent pas le démarrage. Les messages de préparation sont échappés avant insertion HTML.

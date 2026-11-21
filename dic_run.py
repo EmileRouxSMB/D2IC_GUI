@@ -87,10 +87,10 @@ def _allocate_run_dir(out_root, created_at):
             number += 1
 
 
-def prepare_run(folder):
+def prepare_run(folder, *, run=None, settings=None):
     """Freeze settings, mask and absolute VIS source manifest before launch."""
     folder = Path(folder).expanduser().resolve()
-    settings = load_project(folder)
+    settings = load_project(folder) if settings is None else settings
     ref, deformed, warnings = _snapshot_images(folder, settings)
     mask = resolve_path(folder, settings['roi']['final_mask'])
     if not mask.is_file():
@@ -132,7 +132,7 @@ def prepare_run(folder):
         raise ValueError('Aucune image VIS déformée retenue après le pas d’échantillonnage')
     created_at = datetime.now(timezone.utc)
     out_root = resolve_path(folder, settings['paths']['output_dir'])
-    run = _allocate_run_dir(out_root, created_at)
+    run = _allocate_run_dir(out_root, created_at) if run is None else Path(run)
     run_id = run.name
     (run/'results').mkdir()
     shutil.copy2(mask, run/'mask_final.tif')
@@ -173,6 +173,68 @@ def prepare_run(folder):
     (run/'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     write_status(run, 'pending')
     return run
+
+
+
+
+def write_preparation(run, report):
+    """Publish a preparation report atomically while the job list is polled."""
+    path = Path(run)/'preparation.json'
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    temporary.replace(path)
+
+
+def prepare_job(folder):
+    """Create a visible job, freeze valid inputs and retain all diagnostics.
+
+    A blocked job is a preparation report, never an executable run. Correct
+    the study and prepare a new job to obtain a new immutable snapshot.
+    """
+    from .readiness import evaluate_readiness
+
+    folder = Path(folder).resolve()
+    settings = load_project(folder)
+    run = _allocate_run_dir(resolve_path(folder, settings['paths']['output_dir']),
+                            datetime.now(timezone.utc))
+    (run/'config.toml').write_text(dump_toml(settings), encoding='utf-8')
+    write_status(run, 'preparing')
+    try:
+        report = evaluate_readiness(folder, settings, check_active_run=False)
+        if report['ready']:
+            preview = json.loads((folder/'roi'/'mesh_preview.json').read_text(encoding='utf-8'))
+            prepare_run(folder, run=run, settings=settings)
+            frozen = json.loads((run/'manifest.json').read_text(encoding='utf-8'))
+            if frozen['mask_sha256'] != preview['mask_sha256']:
+                raise ValueError('Masque modifié pendant la préparation ; préparer un nouveau job')
+    except Exception as error:
+        # Full pixel decoding and snapshot creation can fail after the quick
+        # checks. Keep that failure on the same row rather than losing the job.
+        report = {'ready': False, 'required': [
+            {'view': 'Job Manager', 'message': str(error)}], 'optional': []}
+    write_preparation(run, report)
+    write_status(run, 'pending' if report['ready'] else 'blocked')
+    return run
+
+
+def verify_prepared_run(run):
+    """Reject a frozen job whose external sources or copied assets changed."""
+    run = Path(run)
+    manifest = json.loads((run/'manifest.json').read_text(encoding='utf-8'))
+    for row in [manifest['visible_reference'], *manifest['visible_images'],
+                *manifest.get('thermal_images', [])]:
+        path = Path(row['path'])
+        if not path.is_file():
+            raise ValueError(f"Image source disparue : {path} ; préparer un nouveau job")
+        stat = path.stat()
+        if stat.st_size != row['size'] or stat.st_mtime_ns != row['mtime_ns']:
+            raise ValueError(f"Image source modifiée : {path} ; préparer un nouveau job")
+    if hashlib.sha256((run/'mask_final.tif').read_bytes()).hexdigest() != manifest['mask_sha256']:
+        raise ValueError('Masque figé modifié ; préparer un nouveau job')
+    if manifest.get('calibration_sha256'):
+        digest = hashlib.sha256((run/'visible_thermal.json').read_bytes()).hexdigest()
+        if digest != manifest['calibration_sha256']:
+            raise ValueError('Calibration figée modifiée ; préparer un nouveau job')
 
 
 def dump_raw_toml(data):
@@ -277,9 +339,15 @@ def inspect_run(run, *, details=True):
         status['total_frames'] = int(progress.get('total_frames') or 0)
         if status['total_frames']:
             status['progress'] = status['completed_frames'] / status['total_frames']
+    preparation = run/'preparation.json'
+    if preparation.is_file():
+        status['preparation'] = json.loads(preparation.read_text(encoding='utf-8'))
+    status['can_start'] = (status['state'] == 'pending'
+                           and status.get('preparation', {}).get('ready', False)
+                           and (run/'manifest.json').is_file())
     status['run_id'] = run.name
     if details:
         status['log_tail'] = (run/'run.log').read_text(encoding='utf-8')[-8000:] if (run/'run.log').exists() else ''
-    if details and status['state'] == 'completed':
+    if details and (run/'manifest.json').is_file():
         status['manifest'] = json.loads((run/'manifest.json').read_text())
     return status

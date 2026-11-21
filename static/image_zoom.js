@@ -28,20 +28,22 @@
 
   function resetState(state) { state.zoom = 1; state.tx = state.ty = 0; return state; }
 
-  function preserveCenterOnResize(state, oldWidth, oldHeight, width, height, imageWidth, imageHeight) {
+  function preserveCenterOnResize(state, oldWidth, oldHeight, width, height, imageWidth, imageHeight, contentTop = 0) {
     if (!oldWidth || !oldHeight || !width || !height) return state;
-    const oldBox = containBox(oldWidth, oldHeight, imageWidth, imageHeight);
-    const newBox = containBox(width, height, imageWidth, imageHeight);
+    const oldBox = containBox(oldWidth, oldHeight - contentTop, imageWidth, imageHeight);
+    const newBox = containBox(width, height - contentTop, imageWidth, imageHeight);
+    if (oldBox) oldBox.top += contentTop;
+    if (newBox) newBox.top += contentTop;
     if (!oldBox || !newBox) {
       state.tx *= width / oldWidth; state.ty *= height / oldHeight;
       return state;
     }
     const centerX = (oldWidth / 2 - state.tx) / state.zoom;
-    const centerY = (oldHeight / 2 - state.ty) / state.zoom;
+    const centerY = ((oldHeight + contentTop) / 2 - state.ty) / state.zoom;
     const imageX = (centerX - oldBox.left) / oldBox.width;
     const imageY = (centerY - oldBox.top) / oldBox.height;
     state.tx = width / 2 - state.zoom * (newBox.left + imageX * newBox.width);
-    state.ty = height / 2 - state.zoom * (newBox.top + imageY * newBox.height);
+    state.ty = (height + contentTop) / 2 - state.zoom * (newBox.top + imageY * newBox.height);
     return state;
   }
 
@@ -82,7 +84,9 @@
     if (frame.__d2icZoomController) return frame.__d2icZoomController;
     const doc = frame.ownerDocument;
     const state = frame.__d2icZoomState || (frame.__d2icZoomState = { zoom: 1, tx: 0, ty: 0 });
-    const layers = options.layers || Array.from(frame.querySelectorAll('img'));
+    const images = Array.from(frame.querySelectorAll('img'));
+    const layers = options.layers || images;
+    const loadTargets = [...new Set([...images, ...layers])];
     const toolbar = doc.createElement('div');
     toolbar.className = 'd2ic-image-zoom-toolbar';
     toolbar.style.cssText = 'position:absolute;z-index:20;top:8px;right:8px;display:flex;gap:4px;transform:none';
@@ -91,7 +95,7 @@
     toggle.type = resetButton.type = 'button'; toggle.textContent = 'Zoom'; resetButton.textContent = 'Réinitialiser la vue';
     toggle.title = 'Glisser sur l’image pour zoomer par rectangle';
     toolbar.title = 'Ctrl/Cmd + clic sur l’image pour dézoomer';
-    resetButton.title = 'Réinitialiser la vue';
+    resetButton.title = 'Afficher l’image entière, ajustée à la zone disponible';
     toggle.setAttribute('aria-pressed', options.interactive ? 'false' : 'true');
     zoomLabel.className = 'd2ic-image-zoom-level';
     zoomLabel.style.cssText = 'align-self:center;font-size:11px;padding:0 5px;white-space:nowrap';
@@ -122,8 +126,13 @@
       if (options.onChange) options.onChange({ zoom: state.zoom, tx: state.tx, ty: state.ty });
       frame.dispatchEvent(new doc.defaultView.Event('imageviewchange'));
     }
+    function updateCursor(event) {
+      frame.classList.toggle('image-zoom-out', !!(event.ctrlKey || event.metaKey));
+    }
+    function clearModifier() { updateCursor({}); }
     function local(event) { const r = frame.getBoundingClientRect(); return { x: event.clientX - r.left - frame.clientLeft, y: event.clientY - r.top - frame.clientTop }; }
     function onDown(event) {
+      updateCursor(event);
       if (toolbar.contains(event.target)) { suppressClick = false; return; }
       suppressClick = false;
       if (event.button !== 0) return;
@@ -139,6 +148,7 @@
       frame.setPointerCapture?.(event.pointerId);
     }
     function onMove(event) {
+      updateCursor(event);
       if (!dragging) return;
       event.preventDefault(); event.stopImmediatePropagation();
       const raw = local(event), p = { x: clamp(raw.x, 0, frame.clientWidth), y: clamp(raw.y, 0, frame.clientHeight) };
@@ -168,15 +178,22 @@
     function onLoad() { render(); }
     function onResize() {
       const width = frame.clientWidth, height = frame.clientHeight;
-      if (previousSize.width && previousSize.height) {
+      if (state.zoom === 1) {
+        resetState(state);
+      } else if (previousSize.width && previousSize.height) {
         const image = layers.find(layer => layer?.naturalWidth) || frame.querySelector('img');
         if (image && image.naturalWidth && image.naturalHeight) {
-          preserveCenterOnResize(state, previousSize.width, previousSize.height, width, height, image.naturalWidth, image.naturalHeight);
+          preserveCenterOnResize(state, previousSize.width, previousSize.height, width, height, image.naturalWidth, image.naturalHeight, layers[0]?.offsetTop || 0);
         } else { state.tx *= width / previousSize.width; state.ty *= height / previousSize.height; }
       }
       previousSize = { width, height }; render();
     }
     function reset() { resetState(state); render(); }
+    // Keyboard events update the cursor even when the pointer stays still.
+    doc.addEventListener('keydown', updateCursor, true);
+    doc.addEventListener('keyup', updateCursor, true);
+    doc.defaultView.addEventListener('blur', clearModifier);
+    frame.addEventListener('pointerenter', updateCursor);
     frame.addEventListener('pointerdown', onDown, true);
     frame.addEventListener('pointermove', onMove, true);
     frame.addEventListener('pointerup', onUp, true);
@@ -186,15 +203,19 @@
     toolbar.addEventListener('click', event => event.stopPropagation());
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
     observer?.observe(frame);
-    for (const img of layers) img?.addEventListener?.('load', onLoad);
+    for (const target of loadTargets) target.addEventListener('load', onLoad);
     const controller = { reset, setInteractive(value) { active = !!value; render(); }, destroy() {
       if (destroyed) return; destroyed = true; observer?.disconnect();
       frame.removeEventListener('pointerdown', onDown, true); frame.removeEventListener('pointermove', onMove, true);
       frame.removeEventListener('pointerup', onUp, true); frame.removeEventListener('pointercancel', onUp, true);
       frame.removeEventListener('click', onClick, true);
-      for (const img of layers) img?.removeEventListener?.('load', onLoad);
+      frame.removeEventListener('pointerenter', updateCursor);
+      doc.removeEventListener('keydown', updateCursor, true);
+      doc.removeEventListener('keyup', updateCursor, true);
+      doc.defaultView.removeEventListener('blur', clearModifier);
+      for (const target of loadTargets) target.removeEventListener('load', onLoad);
       toolbar.remove(); rect.remove(); delete frame.__d2icZoomController;
-      frame.classList.remove('image-zoom-mode');
+      frame.classList.remove('image-zoom-mode', 'image-zoom-out');
     } };
     controller.cleanup = controller.destroy;
     frame.__d2icZoomController = controller;

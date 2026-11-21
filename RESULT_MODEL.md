@@ -39,3 +39,10 @@ Une sortie en mm exige un étalonnage confirmé. D2IC garde le magasin en pixels
 D2IC écrit une frame puis son checkpoint atomiquement. `progress.json` signale les images terminées ; une frame non validée par checkpoint n'est pas exposée. À la reprise, D2IC compare l'empreinte de la configuration, des images et du masque, puis vérifie le maillage avant de réutiliser un déplacement. Le GUI conserve les anciens runs et n'autorise la reprise que pour un état échoué ou annulé. La relocalisation d'une étude ne réécrit pas les chemins historiques des runs.
 
 Les exports PVD sont datés aux temps VIS mesurés. Un PVD couplé omet les instants sans paire TH valide. Le format `dic_results.npz` est conservé comme export de compatibilité et peut être recréé à partir du magasin sans relancer la DIC.
+
+
+## Courbes et exports CSV
+
+Le suivi de points exporte la grandeur choisie pour tous les nœuds sélectionnés et tous les instants validés, référence comprise (`node,frame,time_s,<champ>_<unité>`). La coupe est un segment matériel défini en pixels VIS de référence ; le clic dans la configuration courante est inversé par interpolation affine des triangles de visualisation. Les champs nodaux sont interpolés sur ce segment, les quadrilatères étant découpés en triangles 012 et 023 comme les cartes. La distance A → B est mesurée dans la configuration de référence et convertie dans l’unité de longueur du run. Les sorties hors maillage ou non finies restent absentes et produisent des cellules CSV vides.
+
+La coupe exporte soit l’image VIS choisie, soit tous les instants validés (`frame,time_s,distance_<unité>,x_ref_px,y_ref_px,<champ>_<unité>`). Les déformations portent l’unité `1`, les températures celle du run. Ces analyses ne couvrent pas les résidus ni la température élémentaire. Le centrage des couleurs sur zéro est une option de visualisation : bornes ±max(|min|, |max|), en partant des bornes explicites si présentes ou du champ courant autrement.

@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f7f5">
   <title>D2IC — étude locale</title>
-  <link rel="stylesheet" href="/static/style.css?v=roi-shapes-1">
-  <script src="/static/image_zoom.js?v=image-zoom-1" defer></script>
-  <script src="/static/roi_shapes.js?v=roi-shapes-1" defer></script>
-  <script src="/static/app.js?v=roi-shapes-1" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=20261111-vector-mesh">
+  <script src="/static/image_zoom.js?v=20261111-result-analysis" defer></script>
+  <script src="/static/roi_mesh.js?v=20261111-vector-mesh" defer></script>
+  <script src="/static/roi_shapes.js?v=result-overlay-1" defer></script>
+  <script src="/static/app.js?v=20261111-vector-mesh" defer></script>
 </head>
 <body class="nav-collapsed">
   <header class="topbar">
@@ -60,7 +61,6 @@
       <div class="splitter" id="splitter" role="separator" aria-label="Redimensionner le panneau des paramètres" aria-orientation="vertical" aria-valuemin="25" aria-valuemax="55" aria-valuenow="30" tabindex="0"><span></span></div>
       <aside class="settings-pane" id="settings-pane" aria-label="Paramètres de la vue">
         <div class="settings-head"><div><div class="eyebrow">CONFIGURATION</div><h2 id="settings-title">Projet VIS</h2></div><button type="button" class="collapse-settings" id="collapse-settings" aria-controls="settings-pane" aria-expanded="true" aria-label="Replier les paramètres" title="Replier les paramètres">›</button><button class="icon-button" id="close-settings" aria-label="Fermer les paramètres">×</button></div>
-        <div class="field-search"><span>⌕</span><input id="field-search" type="search" placeholder="Rechercher un paramètre" aria-label="Rechercher un paramètre"><kbd>⌘ K</kbd></div>
         <div id="field-groups" class="field-groups"><div class="loading-state">Chargement du schéma…</div></div>
         <div class="settings-foot"><span id="config-message">Les réglages sont enregistrés dans l’étude.</span><button class="button primary" id="save-config">Enregistrer les réglages</button></div>
       </aside>
@@ -76,6 +76,12 @@
     <div id="file-selection" class="file-selection">Choisissez un élément.</div>
     <label id="file-name-row" class="file-name-row" hidden>Nom du nouveau dossier<input id="file-name" type="text" autocomplete="off" placeholder="Nom du dossier"></label>
     <div class="file-dialog-actions"><button type="button" class="button quiet" id="file-cancel">Annuler</button><button type="button" class="button primary" id="file-choose" disabled>Sélectionner</button></div>
+  </dialog>
+  <dialog id="readiness-dialog" aria-labelledby="readiness-title">
+    <h2 id="readiness-title">Étapes à compléter</h2>
+    <p class="readiness-legend"><span>Gris : inactive</span> · <span>Rouge : bloquante</span> · <span>Vert : complétée</span></p>
+    <div id="readiness-details"></div>
+    <div class="readiness-actions"><button type="button" class="button outline" id="readiness-close">Fermer</button></div>
   </dialog>
   <dialog id="notice-dialog"><form method="dialog"><button class="dialog-close" aria-label="Fermer">×</button><div class="eyebrow">D2IC</div><h2 id="dialog-title">Information</h2><p id="dialog-copy"></p><button class="button primary">Fermer</button></form></dialog>
 </body>

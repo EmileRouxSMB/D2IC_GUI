@@ -199,16 +199,19 @@ L'API HTTP transmet des paramètres et des aperçus ; elle ne transporte pas les
 | `GET /api/mesh/preview-image` | Relire l’aperçu valide pour le masque et les paramètres courants |
 | `POST /api/roi/save` | Copier le masque source dans l’étude et invalider le maillage précédent |
 | `POST /api/registration/fit` | Ajuster `H` à partir des correspondances, retourner résidus et superposition |
+| `POST /api/readiness` | Évaluer sans écriture le formulaire courant `{config}` ; retourner `ready`, `steps`, `required` et `optional` avec vues et messages |
 | `POST /api/registration/approve` | Enregistrer la validation manuelle pour l'empreinte de calibration affichée |
 | `GET /api/synchronization` | Retourner les TH encadrantes et les poids pour chaque temps VIS |
-| `POST /api/runs` | Figer les entrées et démarrer le processus de calcul |
+| `POST /api/runs/prepare` | Créer la ligne, conserver le rapport de préparation et figer les entrées valides sans calcul |
+| `POST /api/runs/{id}/start` | Lancer uniquement un job préparé sans erreur après vérification des sources figées |
+| `POST /api/runs` | Ancienne route de lancement immédiat, conservée pour compatibilité |
 | `GET /api/runs/{id}` | Lire état, progression, résultats et erreur |
 | `POST /api/runs/{id}/cancel` | Arrêter le processus du run actif et le marquer annulé |
 | `POST /api/runs/{id}/resume` | Reprendre un run arrêté ou échoué depuis le magasin DIC sauvegardé |
 | `DELETE /api/runs/{id}` | Supprimer le seul dossier du run arrêté, après confirmation dans le GUI ; refuser un run actif ou un lien hors du dossier des runs |
 | `POST /api/runs/{id}/export` | Produire VTU/PVD et manifeste |
 
-Le processus de travail écrit d'abord les résultats dans un répertoire temporaire du run, puis les rend visibles après succès. Une erreur conserve la configuration, le journal et le diagnostic. L'annulation demande l'arrêt du processus ; les fichiers partiels ne sont pas présentés comme résultats valides. L'état est défini au minimum par `pending`, `running`, `completed`, `failed`, `cancelled`.
+Le processus de travail écrit d'abord les résultats dans un répertoire temporaire du run, puis les rend visibles après succès. Une erreur conserve la configuration, le journal et le diagnostic. L'annulation demande l'arrêt du processus ; les fichiers partiels ne sont pas présentés comme résultats valides. L’état comprend `preparing`, `blocked` (erreurs de préparation), `pending` (préparé, en attente du bouton Lancer), `running`, `completed`, `failed`, `cancelled`. `preparation.json` conserve `ready`, `required` et `optional` ; la liste expose ce rapport et `can_start`. Un job bloqué garde son diagnostic mais n’est jamais exécutable. Une nouvelle préparation crée un nouveau snapshot après correction. Préparer plusieurs jobs est autorisé pendant un calcul ; un seul worker est lancé à la fois. Démarrage, reprise et suppression partagent un verrou ; un job encore en préparation ne peut pas être supprimé.
 
 Le serveur n'écoute que sur l'interface loopback en première version. Les chemins fournis par le navigateur sont normalisés et les fichiers de projet sont lus/écrits uniquement dans les emplacements sélectionnés explicitement. Les exports sont servis comme téléchargements depuis le dossier du run.
 
@@ -236,3 +239,11 @@ La version DIC est acceptée quand un projet `config.toml` suffit à reproduire 
 - [Export ParaView actuel](../D2IC/src/d2ic/io/paraview.py) : champs DIC nodaux, VTU et PVD.
 - [Documentation FastAPI — templates](https://fastapi.tiangolo.com/advanced/templates/) et [tâches d'arrière-plan](https://fastapi.tiangolo.com/tutorial/background-tasks/) : base du serveur local et séparation du calcul lourd.
 - [Documentation Python — `tomllib`](https://docs.python.org/3/library/tomllib.html) : lecture TOML uniquement ; l'écriture demande un outil distinct.
+
+
+Les calques ROI visibles sont servis en SVG dans le repère natif `(x,y)` de l’image VIS : les contours des masques binaires représentent les zones géométrique et photométrique, et un chemin unique regroupe les arêtes finies du maillage avec les doublons partagés retirés. Le maillage a une largeur de trait de `0.2` pixel VIS. L’API PNG historique est conservée pour l’aperçu raster composé et les clients existants.
+
+
+### Catalogue déclaratif des paramètres
+
+`parameters.toml` définit les champs et leurs métadonnées de présentation. Chargé par `schema.py` au démarrage, il alimente valeurs par défaut, validation des types/choix et `GET /api/schema`. Le navigateur génère les contrôles à partir du type explicite, de l’onglet et des options du catalogue. Les invariants entre paramètres restent dans le validateur scientifique. Le fichier `config.toml` propre à chaque étude conserve son format. Voir `CONFIG_SCHEMA.md` pour les conventions et un exemple d’extension.

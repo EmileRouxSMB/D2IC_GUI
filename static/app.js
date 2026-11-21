@@ -18,6 +18,7 @@
 
   function setDirty(dirty = true) {
     state.dirty = dirty;
+    scheduleReadiness();
     const node = $('#save-state');
     node.classList.toggle('dirty', dirty);
     node.classList.toggle('error', false);
@@ -47,14 +48,6 @@
     target[parts.at(-1)] = value;
   }
   function htmlEscape(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-  const PATH_PICKERS = {
-    'paths.visible_dir': ['directory', 'Dossier des images VIS'],
-    'paths.reference_image': ['image', 'Image de référence VIS'],
-    'paths.output_dir': ['directory', 'Dossier des runs'],
-    'roi.initial_mask': ['mask', 'Masque initial'],
-    'thermal.image_dir': ['directory', 'Dossier des images thermiques'],
-    'registration.file': ['registration', 'Calibration VIS–TH']
-  };
   const explorer = { options: null, data: null, selected: null, resolve: null, requestId: 0 };
   function explorerUpdateChoice() {
     const mode = explorer.options.mode;
@@ -154,7 +147,9 @@
   let searchTimer;
   $('#file-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => explorerLoad(explorer.data?.path || ''), 250); });
   async function browseField(path) {
-    const [mode, title] = PATH_PICKERS[path];
+    const meta = state.schema.fields[path];
+    const mode = meta.picker || meta.type;
+    const title = meta.label;
     const current = valueAt(path);
     const initialPath = path === 'paths.reference_image'
       ? (valueAt('paths.visible_dir') || state.project.folder)
@@ -162,7 +157,7 @@
         ? current.slice(0, current.lastIndexOf('/')) || '/'
         : current || state.project.folder;
     const result = await openExplorer({ mode: mode === 'directory' ? 'directory' : 'file',
-      kind: mode === 'directory' ? 'directory' : mode, title, initialPath });
+      kind: mode === 'file' ? 'any' : mode, title, initialPath });
     if (!result) return;
     if (path === 'paths.reference_image') {
       const slash = result.lastIndexOf('/');
@@ -193,21 +188,27 @@
     $('#config-message').textContent = 'Chemin sélectionné. L’aperçu VIS se met à jour automatiquement ; enregistrez pour conserver ce choix.';
   }
   function controlFor(path, meta, value) {
-    const type = typeof (meta.default !== undefined ? meta.default : value);
-    if (Array.isArray(meta.choices) && meta.choices.length) return `<select data-path="${htmlEscape(path)}">${meta.choices.map(option => `<option value="${htmlEscape(option)}" ${String(option) === String(value) ? 'selected' : ''}>${htmlEscape(option)}</option>`).join('')}</select>`;
-    if (type === 'boolean') return `<input type="checkbox" data-path="${htmlEscape(path)}" ${value ? 'checked' : ''} ${path==='output.save_npz'?'disabled title="Magasin de résultats par image requis pour la reprise"':''} aria-label="${htmlEscape(meta.label || path)}">`;
-    if (type === 'number') return `<input type="number" data-path="${htmlEscape(path)}" value="${htmlEscape(value)}" ${meta.minimum != null ? `min="${htmlEscape(meta.minimum)}"` : ''} step="any">`;
-    if (Array.isArray(value)) return `<input type="text" data-path="${htmlEscape(path)}" value="${htmlEscape(JSON.stringify(value))}" aria-label="${htmlEscape(meta.label || path)}">`;
-    return `<input type="text" data-path="${htmlEscape(path)}" value="${htmlEscape(value)}" aria-label="${htmlEscape(meta.label || path)}">`;
+    const attrs = `data-path="${htmlEscape(path)}" ${meta.readonly ? 'disabled' : ''} aria-label="${htmlEscape(meta.label || path)}"`;
+    if (Array.isArray(meta.choices) && meta.choices.length) {
+      const multiple = meta.type === 'array';
+      return `<select ${attrs} ${multiple ? 'multiple' : ''}>${meta.choices.map(option => `<option value="${htmlEscape(option)}" ${(multiple ? value.includes(option) : option === value) ? 'selected' : ''}>${htmlEscape(option)}</option>`).join('')}</select>`;
+    }
+    if (meta.type === 'boolean') return `<input type="checkbox" ${attrs} ${value ? 'checked' : ''}>`;
+    if (meta.type === 'integer' || meta.type === 'float') return `<input type="number" ${attrs} value="${htmlEscape(value)}" ${meta.minimum != null ? `min="${htmlEscape(meta.minimum)}"` : ''} step="${meta.type === 'integer' ? '1' : 'any'}">`;
+    return `<input type="text" ${attrs} value="${htmlEscape(meta.type === 'array' ? JSON.stringify(value) : value)}">`;
   }
   function fieldView(path, meta) {
-    if (path === 'dic.roi_erosion_px') return 'ROI';
-    if (path === 'project.version' || path === 'project.mode') return null;
-    if (path === 'project.name' || path === 'paths.output_dir') return 'Job Manager';
-    if (path.startsWith('scale.')) return 'Échelle';
-    if (path === 'time.visible_fps' || path === 'thermal.thermal_fps' || path.startsWith('synchronization.')) return 'Synchro';
-    if (path.startsWith('dic.') || path.startsWith('time.') || path.startsWith('runtime.')) return 'Réglages DIC';
-    return meta.view || path.split('.')[0];
+    if (meta.hidden) return null;
+    return state.config.project?.mode === 'dic' && meta.view_dic ? meta.view_dic : meta.view;
+  }
+  function readControl(input, meta) {
+    if (meta.type === 'boolean') return input.checked;
+    if (meta.type === 'integer' || meta.type === 'float') return input.value === '' ? '' : Number(input.value);
+    if (meta.type === 'array') {
+      if (input.multiple) return Array.from(input.selectedOptions, option => option.value);
+      try { return JSON.parse(input.value); } catch { return input.value; }
+    }
+    return input.value;
   }
   let seriesRequestId = 0;
   function applyVisibleSeries(series) {
@@ -331,26 +332,19 @@
     for (const [path, meta] of entries) {
       const view = fieldView(path, meta);
       if (!view || view !== state.view) continue;
-      if (view === 'ROI' && !['roi.initial_mask', 'mesh.element_size_px', 'dic.roi_erosion_px'].includes(path)) continue;
-      if (path === 'paths.excluded_images' || path === 'thermal.excluded_images') continue;
-      if (['Thermique', 'Synchro'].includes(view) && state.config.project?.mode !== 'dic_thermal') continue;
-      const group = view === 'Réglages DIC'
-        ? ({ dic: 'Solveur DIC', time: 'Temps VIS', runtime: 'Calcul JAX' }[path.split('.')[0]])
-        : view;
+      if ((state.schema.thermal_sections || []).includes(path.split('.')[0]) && state.config.project?.mode !== 'dic_thermal') continue;
+      const group = meta.group || view;
       if (!byView.has(group)) byView.set(group, []);
       byView.get(group).push([path, meta]);
     }
     for (const [view, fields] of byView) {
-      if (view === 'VIS') {
-        const order = ['paths.visible_dir', 'paths.visible_pattern', 'paths.reference_image'];
-        fields.sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
-      }
+      fields.sort((a, b) => (a[1].order || 0) - (b[1].order || 0));
       const section = document.createElement('section'); section.className = 'field-group'; section.dataset.group = view;
       section.innerHTML = `<h3 class="group-title">${htmlEscape(view)}</h3>`;
       for (const [path, meta] of fields) {
         const value = valueAt(path) ?? meta.default ?? '';
-        const card = document.createElement('article'); card.className = 'field-card'; card.dataset.search = `${path} ${meta.label || ''} ${meta.help || ''}`.toLowerCase();
-        card.innerHTML = `<div class="field-label-row"><label class="field-label" for="field-${path.replace(/[^a-z0-9]/gi,'-')}">${htmlEscape(meta.label || path)}</label><span class="field-help" tabindex="0" data-help="${htmlEscape(`${meta.help || 'Aide non renseignée.'} Clé TOML : ${path}.`)}" aria-label="Aide pour ${htmlEscape(meta.label || path)}">i</span><span class="field-default">Défaut : ${htmlEscape(Array.isArray(meta.default) ? JSON.stringify(meta.default) : (meta.default ?? 'à renseigner'))}</span></div><div class="field-control">${controlFor(path, meta, value)}</div><div class="field-meta"><span>${htmlEscape(path==='output.save_npz'?'Magasin par image requis pour reprendre les champs DIC.':(meta.unit || path))}</span><button class="field-reset" type="button" data-reset="${htmlEscape(path)}">Réinitialiser</button></div>`;
+        const card = document.createElement('article'); card.className = 'field-card';
+        card.innerHTML = `<div class="field-label-row"><label class="field-label" for="field-${path.replace(/[^a-z0-9]/gi,'-')}">${htmlEscape(meta.label || path)}</label><span class="field-help" tabindex="0" data-help="${htmlEscape(`${meta.help || 'Aide non renseignée.'} Clé TOML : ${path}.`)}" aria-label="Aide pour ${htmlEscape(meta.label || path)}">i</span><span class="field-default">Défaut : ${htmlEscape(Array.isArray(meta.default) ? JSON.stringify(meta.default) : (meta.default ?? 'à renseigner'))}</span></div><div class="field-control">${controlFor(path, meta, value)}</div><div class="field-meta"><span>${htmlEscape(meta.unit || path)}</span><button class="field-reset" type="button" data-reset="${htmlEscape(path)}" ${meta.readonly ? 'disabled' : ''}>Réinitialiser</button></div>`;
         const input = card.querySelector('[data-path]'); if (input) input.id = `field-${path.replace(/[^a-z0-9]/gi,'-')}`;
         if (path === 'dic.roi_erosion_px') {
           const note = document.createElement('p');
@@ -358,9 +352,9 @@
           note.textContent = 'Exclut une bande aux bords et aux trous du critère photométrique. Maillage inchangé. 0 = désactivé ; par exemple 3 px VIS d’origine.';
           card.append(note);
         }
-        if (PATH_PICKERS[path]) {
+        if (meta.type === 'directory' || meta.type === 'file') {
           const browse = document.createElement('button');
-          browse.type = 'button'; browse.className = 'field-browse';
+          browse.type = 'button'; browse.className = 'field-browse'; browse.disabled = Boolean(meta.readonly);
           browse.textContent = 'Parcourir…'; browse.setAttribute('aria-label', 'Parcourir : ' + (meta.label || path));
           browse.addEventListener('click', () => browseField(path));
           card.querySelector('.field-control').append(browse);
@@ -385,11 +379,8 @@
       renderVisibleSeries(!valueAt('paths.reference_image'));
     }
     host.querySelectorAll('[data-path]').forEach(input => input.addEventListener('change', () => {
-      const path = input.dataset.path; let val;
-      if (input.type === 'checkbox') val = input.checked;
-      else if (input.type === 'number') val = input.value === '' ? '' : Number(input.value);
-      else if (Array.isArray(valueAt(path))) { try { val = JSON.parse(input.value); } catch { val = input.value; } }
-      else val = input.value;
+      const path = input.dataset.path;
+      const val = readControl(input, state.schema.fields[path]);
       putValue(path, val); setDirty();
       if (path === 'paths.visible_dir') {
         putValue('paths.excluded_images', []);
@@ -427,7 +418,7 @@
     host.querySelectorAll('[data-reset]').forEach(button => button.addEventListener('click', () => {
       const meta = new Map(entries).get(button.dataset.reset); if (!meta) return;
       const path = button.dataset.reset;
-      putValue(path, Array.isArray(meta.default) ? [...meta.default] : meta.default);
+      putValue(path, structuredClone(meta.default));
       if (path === 'thermal.image_dir') { putValue('thermal.excluded_images', []); putValue('thermal.image_pattern', ''); }
       if (path === 'thermal.image_pattern') putValue('thermal.excluded_images', []);
       renderFields(); setDirty();
@@ -444,18 +435,12 @@
         else updateScalePreview();
       }
     }));
-    filterFields();
-  }
-  function filterFields() {
-    const term = $('#field-search').value.trim().toLowerCase();
-    document.querySelectorAll('.field-card').forEach(card => card.hidden = !!term && !card.dataset.search.includes(term));
-    document.querySelectorAll('.field-group').forEach(group => group.hidden = !group.querySelector('.field-card:not([hidden])'));
   }
   function normalizeProject(payload) {
     state.project = payload || {};
     state.projectKey = payload.folder || payload.path || payload.name || 'default';
     state.selectedRun = null;
-    resultNodes.clear(); historyCache.clear(); colorBounds.clear(); historyRequest++;
+    resultNodes.clear(); historyCache.clear(); colorBounds.clear(); resultSections.clear(); historyRequest++; sectionRequest++;
     state.config = structuredClone(payload.config || payload.settings || payload);
     if (!state.config.project) state.config.project = { mode: 'dic', name: 'Nouvelle étude' };
     $('#project-name').textContent = payload.name || state.config.project.name || 'Nouvelle étude';
@@ -486,7 +471,6 @@
     if (view !== 'ROI') { roiEditor?.destroy(); roiEditor = null; }
     state.view = view;
     if (view !== 'Échelle') scaleResizeObserver?.disconnect();
-    $('#field-search').value = '';
     renderFields();
     document.querySelectorAll('.nav-item').forEach(item => { const active = item.dataset.view === view; item.classList.toggle('active', active); active ? item.setAttribute('aria-current','page') : item.removeAttribute('aria-current'); });
     const [, , , stageTitle, stageCopy] = viewInfo[view];
@@ -494,8 +478,7 @@
     $('#settings-title').textContent = groups[view] || view;
     if ($('#stage-title')) $('#stage-title').textContent = stageTitle;
     if ($('#stage-copy')) $('#stage-copy').textContent = stageCopy;
-    const mode = state.config.project?.mode;
-    document.querySelectorAll('.thermal-nav').forEach(item => item.hidden = mode !== 'dic_thermal');
+    document.querySelectorAll('.thermal-nav').forEach(item => item.hidden = false);
     document.body.classList.remove('settings-open'); document.body.classList.remove('nav-open');
     loadViewContent(view);
   }
@@ -513,9 +496,9 @@
     if (thermal && state.config.thermal?.image_dir) params.set('thermal_dir', state.config.thermal.image_dir);
     return '/api/image?' + params;
   }
-  function imageMarkup(path, label = 'Aperçu image', full = false, visible = false, thermal = false) {
+  function imageMarkup(path, label = 'Aperçu image', full = false, visible = false, thermal = false, id = '') {
     return path
-      ? '<img class="preview-image" alt="' + htmlEscape(label) + '" src="' +
+      ? '<img class="preview-image"' + (id ? ' id="' + htmlEscape(id) + '"' : '') + ' alt="' + htmlEscape(label) + '" src="' +
         htmlEscape(imageUrl(path, full, visible, thermal)) + '">'
       : '<div class="empty-inline">Aucune image disponible</div>';
   }
@@ -593,9 +576,12 @@
     }
     $('#stage-content').querySelectorAll('.preview-frame, .roi-canvas-wrap, .dic-preview, .point-frame, .sync-preview-image, .run-field-frame, .dic-settings-preview').forEach(frame => {
       if (imageViews.has(frame) || !frame.querySelector('img')) return;
-      const stack = frame.querySelector('.roi-image-stack');
+      const stack = frame.querySelector('[data-image-stack]');
+      const layers = stack ? [stack] : [...frame.querySelectorAll('img')];
+      frame.classList.add('scientific-image-frame');
+      layers.forEach(layer => layer.classList.add('scientific-image-content'));
       imageViews.set(frame, window.D2ICImageZoom.attach(frame, {
-        layers: stack ? [stack] : undefined,
+        layers,
         interactive: frame.matches('.dic-preview, .point-frame, .run-field-frame, .roi-canvas-wrap')
       }));
     });
@@ -606,7 +592,11 @@
         const path = row.dataset.imagePath;
         state.selection = path;
         const img = $('#main-preview');
-        if (img) img.src = imageUrl(path, true, visible, thermal);
+        if (img) {
+          img.src = imageUrl(path, true, visible, thermal);
+          const frame = img.closest('.preview-frame');
+          frame?.__d2icZoomController?.reset();
+        }
         document.querySelectorAll('[data-image-path]').forEach(el => el.classList.toggle('selected', el === row));
       };
       row.addEventListener('click', show);
@@ -760,7 +750,7 @@
     }
     const paths = state.config.paths || {};
     status.textContent = 'Actualisation de la zone photométrique…';
-    layer.src = '/api/roi/layer-image?' + new URLSearchParams({
+    layer.src = '/api/roi/vector-layer?' + new URLSearchParams({
       mask_path: state.config.roi?.initial_mask || '',
       visible_dir: paths.visible_dir || '', reference_image: paths.reference_image || '',
       kind: 'photometric', roi_erosion_px: radius,
@@ -785,7 +775,7 @@
       reference_image: paths.reference_image || '',
       operation: roi.operation || 'none', radius_px: roi.radius_px || 0
     });
-    const roiLayerUrl = '/api/roi/layer-image?' + roiParams;
+    const roiLayerUrl = '/api/roi/vector-layer?' + roiParams;
     const message = !hasReference ? 'Choisissez d’abord une image de référence dans VIS.' :
       !hasMask ? 'Choisissez un fichier ROI TIFF ou PNG dans les paramètres.' :
       'ROI sur la référence VIS. Réglez la taille de maille puis cliquez sur Mailler.';
@@ -803,42 +793,33 @@
       '<label>Action <select id="roi-shape-operation"><option value="add">Ajouter</option><option value="subtract">Retirer</option></select></label>' +
       '<button type="button" class="button quiet" id="roi-undo">Annuler la dernière forme</button>' +
       '<button type="button" class="button quiet" id="roi-new">Nouveau dessin</button>' +
+      '<button type="button" class="button quiet" id="roi-discard">Abandonner le dessin</button>' +
       '<button type="button" class="button primary" id="roi-generate" disabled>Créer l’image ROI</button></div>' +
-      '<div class="roi-canvas-wrap"><div class="roi-image-stack">' +
-      (hasReference ? '<img id="roi-base-image" alt="Référence VIS" src="' +
-        htmlEscape(imageUrl(reference, true, true)) + '">' : '') +
+      '<div class="roi-canvas-wrap"><div class="roi-image-stack" data-image-stack>' +
+      (hasReference ? imageMarkup(reference, 'Référence VIS', true, true, false, 'roi-base-image') : '') +
       (hasReference ? '<img id="roi-layer-image" alt=""' + (hasMask ? ' src="' +
         htmlEscape(roiLayerUrl) + '"' : ' hidden') + '>' : '') +
       (hasReference ? '<img id="photometric-layer-image" alt="Zone photométrique après érosion" hidden>' : '') +
-      (hasReference && hasMask && !state.dirty ?
-        '<img id="mesh-layer-image" alt="" src="/api/mesh/layer-image">' :
-        '<img id="mesh-layer-image" alt="" hidden>') +
-      '</div><canvas id="roi-shape-canvas" aria-label="Tracer un rectangle ou une ellipse pour créer une image ROI"></canvas></div>' +
+      '</div><svg id="mesh-layer-image" class="roi-mesh-overlay" aria-label="Arêtes du maillage" hidden></svg>' +
+      '<canvas id="roi-shape-canvas" aria-label="Tracer un rectangle ou une ellipse pour créer une image ROI"></canvas></div>' +
       '<div id="roi-draw-status" class="inline-status" role="status">Choisir Rectangle ou Ellipse, glisser sur la VIS, puis créer l’image ROI. Le TIFF créé sera sélectionné dans Fichier ROI avant de mailler.</div>' +
       '<div id="roi-status" class="inline-status" role="status">' +
       htmlEscape(message) + '</div><div id="photometric-status" class="inline-status" role="status">' +
       'ROI géométrique en vert · zone photométrique en bleu · maillage inchangé.</div></div>');
-    // Keep all full-resolution layers in one pixel-aligned frame, even
-    // if a browser still has an older stylesheet in its cache.
-    const roiWork = $('.roi-work'), roiFrame = $('.roi-canvas-wrap');
-    const stack = $('.roi-image-stack');
-    roiWork.style.overflow = 'hidden';
-    Object.assign(roiFrame.style, { flex: '1 1 0', minHeight: '0', overflow: 'hidden' });
-    Object.assign(stack.style, {
-      position: 'relative', width: '100%', height: '100%', minWidth: '0', minHeight: '0'
-    });
-    stack.querySelectorAll('img').forEach(image => Object.assign(image.style, {
-      position: 'absolute', inset: '0', width: '100%', height: '100%',
-      maxWidth: 'none', maxHeight: 'none', objectFit: 'contain'
-    }));
+    const roiFrame = $('.roi-canvas-wrap');
     const roiImage = $('#roi-layer-image'), meshImage = $('#mesh-layer-image');
     const roiToggle = $('#show-roi'), meshToggle = $('#show-mesh');
     const photoImage = $('#photometric-layer-image'), photoToggle = $('#show-photometric');
     const status = $('#roi-status');
+    const meshController = hasReference ? window.D2ICROIMesh.attach(roiFrame, $('#roi-base-image'), meshImage) : null;
+    const loadMesh = async url => {
+      try { await meshController.load(url); }
+      catch { if (meshImage.isConnected) meshImage.dispatchEvent(new Event('error')); }
+    };
     const updateLayers = () => {
       if (roiImage) roiImage.hidden = !roiToggle.checked;
       if (photoImage) photoImage.hidden = !photoToggle.checked || photoImage.dataset.ready !== 'true';
-      meshImage.hidden = !meshToggle.checked || meshToggle.disabled;
+      meshImage.toggleAttribute('hidden', !meshToggle.checked || meshToggle.disabled);
     };
     roiToggle.addEventListener('change', updateLayers);
     photoToggle.addEventListener('change', updateLayers);
@@ -875,6 +856,7 @@
       if (hasReference && hasMask) status.textContent = 'Maillage absent ou périmé : cliquez sur Mailler.';
     });
     updateLayers();
+    if (hasReference && hasMask && !state.dirty) loadMesh('/api/mesh/vector-layer');
     if (hasReference) {
       const baseImage = $('#roi-base-image');
       const drawStatus = $('#roi-draw-status'), generate = $('#roi-generate');
@@ -888,10 +870,11 @@
       });
       const disableOldMesh = () => {
         meshToggle.checked = false; meshToggle.disabled = true;
-        meshImage.hidden = true;
+        meshImage.setAttribute('hidden', '');
       };
       const preview = async () => {
         if (generating) return;
+        scheduleReadiness();
         const request = ++revision;
         generate.disabled = true;
         $('#mesh-build').disabled = true;
@@ -941,6 +924,10 @@
       $('#roi-new').addEventListener('click', () => {
         draft.active = true; controller.clear(); choose(currentTool || 'rectangle');
       });
+      $('#roi-discard').addEventListener('click', () => {
+        ++revision; draft.active = false; draft.shapes = [];
+        scheduleReadiness(); loadROI();
+      });
       generate.addEventListener('click', async () => {
         if (generating) return;
         generating = true; ++revision;
@@ -957,7 +944,7 @@
           setDirty();
           $('#roi-rectangle').setAttribute('aria-pressed', 'false');
           $('#roi-ellipse').setAttribute('aria-pressed', 'false');
-          roiImage.src = '/api/roi/layer-image?' + new URLSearchParams({
+          roiImage.src = '/api/roi/vector-layer?' + new URLSearchParams({
             mask_path: result.initial_mask_path, visible_dir: paths.visible_dir, reference_image: paths.reference_image
           });
           updatePhotometricROI();
@@ -976,7 +963,7 @@
         }
       });
       roiEditor = { isActive: () => draft.active, preview,
-        destroy() { ++revision; controller.destroy(); } };
+        destroy() { ++revision; controller.destroy(); meshController?.destroy(); } };
       if (draft.active) preview();
     } else {
       document.querySelectorAll('.roi-draw-toolbar button, .roi-draw-toolbar select').forEach(control => control.disabled = true);
@@ -1005,11 +992,12 @@
         reflectField('roi.initial_mask', saved.initial_mask_path);
         setDirty(false);
         const mesh = await api('/api/mesh/preview', { method: 'POST', body: '{}' });
+        scheduleReadiness();
         if (state.view !== 'ROI' || !meshImage.isConnected) return;
         meshToggle.disabled = false;
         meshToggle.checked = true;
-        meshImage.src = (mesh.layer_url || '/api/mesh/layer-image') + '?v=' + Date.now();
-        roiImage.src = '/api/roi/layer-image?' + new URLSearchParams({
+        await loadMesh((mesh.vector_url || '/api/mesh/vector-layer') + '?v=' + Date.now());
+        roiImage.src = '/api/roi/vector-layer?' + new URLSearchParams({
           mask_path: saved.initial_mask_path, visible_dir: paths.visible_dir,
           reference_image: paths.reference_image,
           operation: state.config.roi?.operation || 'none',
@@ -1089,8 +1077,8 @@
         });
       });
     }
-    $('#fit-registration').addEventListener('click',async()=>{try{const result=await api('/api/registration/fit',{method:'POST',body:JSON.stringify({points:pairs,model:$('#registration-model').value})});$('#pair-status').textContent=result.message||`Ajustement terminé · RMS ${result.rms_px ?? result.rms ?? '—'} px TH`;currentH=result.H;showResiduals(result);drawPoints(); }catch(e){$('#pair-status').textContent=`Ajustement impossible : ${e.message}`;}});
-    $('#approve-registration').addEventListener('click',async()=>{try{const result=await api('/api/registration/approve',{method:'POST',body:JSON.stringify({points:pairs,model:$('#registration-model').value})});$('#pair-status').textContent=result.message||'Correspondance approuvée.';}catch(e){$('#pair-status').textContent=`Validation impossible : ${e.message}`;}});
+    $('#fit-registration').addEventListener('click',async()=>{try{const result=await api('/api/registration/fit',{method:'POST',body:JSON.stringify({points:pairs,model:$('#registration-model').value})});$('#pair-status').textContent=result.message||`Ajustement terminé · RMS ${result.rms_px ?? result.rms ?? '—'} px TH`;currentH=result.H;putValue('registration.approved', false);reflectField('registration.approved', false);scheduleReadiness();showResiduals(result);drawPoints(); }catch(e){$('#pair-status').textContent=`Ajustement impossible : ${e.message}`;}});
+    $('#approve-registration').addEventListener('click',async()=>{try{const result=await api('/api/registration/approve',{method:'POST',body:JSON.stringify({points:pairs,model:$('#registration-model').value})});$('#pair-status').textContent=result.message||'Correspondance approuvée.';putValue('registration.approved', true);reflectField('registration.approved', true);scheduleReadiness();}catch(e){$('#pair-status').textContent=`Validation impossible : ${e.message}`;}});
     try{const saved=await api('/api/registration');if(saved.points?.length){pairs.push(...saved.points);currentH=saved.H;$('#registration-model').value=saved.model;showResiduals(saved);drawPoints();$('#pair-status').textContent=saved.approved?'Correspondance approuvée : inspecter les résidus ci-dessous.':'Correspondance enregistrée, validation manuelle requise.';}}catch(e){$('#pair-status').textContent=`Correspondance enregistrée indisponible : ${e.message}`;}
   }
   let synchronizationRequestId = 0;
@@ -1138,16 +1126,101 @@
       setStage(`<div class="empty-visual"><h2>Synchronisation indisponible</h2><p>${htmlEscape(error.message)}</p></div>`);
     }
   }
+  let readiness = null, readinessTimer = null, readinessRevision = 0, launching = false, preparingRun = false;
+  const statusLabels = { inactive: 'Étape inactive', warning: 'Étape complétée', blocked: 'À compléter · obligatoire', complete: 'Étape complétée' };
+  function applyReadiness(report) {
+    readiness = report;
+    for (const item of document.querySelectorAll('.nav-item')) {
+      const step = report?.steps?.find(step => step.view === item.dataset.view);
+      const status = step?.status === 'warning' ? 'complete' : step?.status || 'inactive';
+      item.dataset.readiness = status;
+      const messages = step?.status === 'blocked' ? step.messages : [];
+      const text = `${groups[item.dataset.view]} — ${statusLabels[status]}${messages?.length ? ' : ' + messages.join(' ; ') : ''}`;
+      item.title = text; item.setAttribute('aria-label', text);
+      const marker = item.querySelector('.nav-state');
+      if (marker) { marker.textContent = { complete: '✓', blocked: '!', warning: '!', inactive: '•' }[status]; marker.setAttribute('aria-hidden', 'true'); }
+    }
+    const prepare = $('#prepare-run');
+    if (prepare) { prepare.disabled = preparingRun; prepare.textContent = preparingRun ? 'Préparation…' : 'Préparer le job'; }
+  }
+  function scheduleReadiness() {
+    clearTimeout(readinessTimer); ++readinessRevision;
+    applyReadiness(null);
+    if (state.config.project) readinessTimer = setTimeout(refreshReadiness, 350);
+  }
+  async function refreshReadiness() {
+    clearTimeout(readinessTimer);
+    const revision = ++readinessRevision, project = state.projectKey;
+    const config = JSON.stringify(state.config);
+    try {
+      const report = await api('/api/readiness', {method: 'POST', body: JSON.stringify({config: state.config})});
+      if (revision !== readinessRevision || project !== state.projectKey || config !== JSON.stringify(state.config)) return null;
+      // A shape draft is not yet the mask used by the solver, even after leaving ROI.
+      const reference = resolveSource(state.config.paths?.reference_image || '', state.config.paths?.visible_dir || '');
+      const draftKey = `${project}\n${reference}\n${state.config.roi?.initial_mask || ''}`;
+      if (roiShapeDrafts.get(draftKey)?.active) {
+        report.ready = false;
+        const message = 'Créer l’image ROI du dessin en cours puis régénérer le maillage, ou abandonner le dessin.';
+        const step = report.steps.find(step => step.view === 'ROI');
+        if (step) { step.status = 'blocked'; step.messages.push(message); }
+        report.required.push({view: 'ROI', message});
+      }
+      applyReadiness(report); return report;
+    } catch (error) {
+      if (revision === readinessRevision) {
+        applyReadiness(null);
+        if ($('#readiness-summary')) $('#readiness-summary').textContent = 'Vérification impossible : ' + error.message;
+      }
+      return null;
+    }
+  }
+  function showReadiness(report) {
+    const dialog = $('#readiness-dialog'), host = $('#readiness-details'); host.replaceChildren();
+    $('#readiness-title').textContent = report?.ready ? 'Prêt au lancement' : 'Étapes à compléter';
+    if (!report) { host.textContent = 'Impossible de vérifier la préparation. Réessayez après avoir vérifié la connexion au serveur local.'; }
+    else {
+      const issues = report.required || [];
+      {
+        const heading = document.createElement('h3'); heading.textContent = 'Obligatoires avant le lancement'; host.append(heading);
+        if (!issues.length) { const text = document.createElement('p'); text.textContent = 'Aucune étape à compléter.'; host.append(text); }
+        const list = document.createElement('ul');
+        for (const issue of issues) {
+          const row = document.createElement('li'), button = document.createElement('button');
+          button.type = 'button'; button.className = 'readiness-link';
+          button.textContent = `${groups[issue.view] || issue.view} : ${issue.message}`;
+          button.addEventListener('click', () => { dialog.close(); selectView(issue.view); });
+          row.append(button); list.append(row);
+        }
+        host.append(list);
+      }
+    }
+    if (!dialog.open) dialog.showModal();
+  }
   function selectedRunStorageKey(){return `d2ic-selected-run:${state.projectKey}`;}
   function rememberRun(id){state.selectedRun=id||null;if(id)localStorage.setItem(selectedRunStorageKey(),id);else localStorage.removeItem(selectedRunStorageKey());}
-  async function launchRun(){
-    if(state.dirty&&!await save()){$('#run-status').textContent='Calcul non lancé : enregistrement de la configuration impossible.';return;}
-    try{const result=await api('/api/runs',{method:'POST',body:JSON.stringify({config:state.config})});const id=result.id||result.run_id;rememberRun(id);$('#run-status').textContent=`Calcul démarré · ${id||'run'}`;if(id)populateRuns();}
-    catch(e){$('#run-status').textContent=`Impossible de lancer : ${e.message}`;}
+  async function prepareRun(){
+    if (preparingRun) return;
+    preparingRun = true; applyReadiness(readiness);
+    try {
+      if(state.dirty && !await save()) { notify('Job non préparé', $('#config-message').textContent); return; }
+      const result=await api('/api/runs/prepare',{method:'POST',body:JSON.stringify({config:state.config})});
+      const id=result.id||result.run_id; if(id)rememberRun(id);
+      await populateRuns();
+    } catch(e) { notify('Job non préparé', e.message); }
+    finally { preparingRun = false; applyReadiness(readiness); }
+  }
+  async function launchRun(id){
+    if (launching || !id) return;
+    launching = true;
+    try {
+      await api(`/api/runs/${encodeURIComponent(id)}/start`,{method:'POST',body:'{}'});
+      rememberRun(id); await populateRuns();
+    } catch(e) { notify('Calcul non lancé', e.message); await populateRuns(); }
+    finally { launching = false; }
   }
   function renderRunSummary(run){
     const host=$('#run-status');if(!host)return;
-    const stateLabel={pending:'En attente',running:'En cours',completed:'Terminé',failed:'Échec',cancelled:'Arrêté'}[run.state||run.status]||run.state||run.status||'En attente';
+    const stateLabel={pending:'Prêt',preparing:'Préparation',blocked:'Erreur de préparation',running:'En cours',completed:'Terminé',failed:'Échec',cancelled:'Arrêté'}[run.state||run.status]||run.state||run.status||'Prêt';
     const completed=Number(run.completed_frames)||0,total=Number(run.total_frames)||0;
     const progress=total?Math.round(100*completed/total):0;
     const updated=run.updated_utc?new Date(run.updated_utc).toLocaleString('fr-FR'):'—';
@@ -1156,8 +1229,20 @@
   }
   const kinematicFields=new Set(['u1','u2','u_norm','E11','E22','E12']);
   const nodeColors=['#cc4b3a','#237caa','#7557ac','#1f8d62','#c17b13','#bb4589','#4d6a25'];
-  const resultNodes=new Map(), historyCache=new Map(), colorBounds=new Map();
-  let historyRequest=0;
+  const resultNodes=new Map(), historyCache=new Map(), colorBounds=new Map(), resultSections=new Map();
+  let analysisMode="history", sectionRequest=0;
+  let historyRequest=0, fieldRequest=0, resultRefreshTimer=null, resultMetadata=null, resultDisplay=null;
+  const storedFieldAlpha = Number(localStorage.getItem('d2ic-result-field-alpha') ?? '0.65');
+  let resultFieldAlpha = Number.isFinite(storedFieldAlpha) ? Math.max(0, Math.min(1, storedFieldAlpha)) : 0.65;
+  const fieldLabel = field => field === 'Residual' ? 'Carte de résidu' : field;
+  function updateFieldAlpha() {
+    const input = $('#field-alpha'), image = $('#run-field-image');
+    if (!input || !image) return;
+    const enabled = $('#result-background').value !== 'none';
+    input.disabled = !enabled;
+    image.style.opacity = enabled ? String(resultFieldAlpha) : '1';
+    $('#field-alpha-value').textContent = `${Math.round(resultFieldAlpha * 100)} %`;
+  }
   function selectedNodes(id){if(!resultNodes.has(id))resultNodes.set(id,new Set());return resultNodes.get(id);}
   function fieldImageGeometry(frame,image){
     if (window.D2ICImageZoom) return window.D2ICImageZoom.geometry(frame,image);
@@ -1169,6 +1254,7 @@
   function drawNodeOverlay(mesh,id){
     const svg=$('#run-node-overlay'),image=$('#run-field-image'),frame=$('.run-field-frame');
     if(!svg||!image||!frame)return;
+    if (image.hidden || $('#run-field')?.value === 'Residual') { svg.replaceChildren(); return; }
     const geometry=fieldImageGeometry(frame,image);
     if(!geometry){svg.replaceChildren();return;}
     const bounds=mesh.extent;
@@ -1176,20 +1262,85 @@
     svg.setAttribute('viewBox',`${bounds[0]} ${bounds[2]} ${bounds[1]-bounds[0]} ${bounds[3]-bounds[2]}`);
     const radius=5*(bounds[1]-bounds[0])/Math.max(geometry.width,1);
     svg.innerHTML=[...selectedNodes(id)].map((node,index)=>{const p=mesh.nodes_xy[node];return p?`<circle cx="${p[0]}" cy="${p[1]}" r="${radius}" fill="${nodeColors[index%nodeColors.length]}" stroke="white" stroke-width="${radius/3}" data-node="${node}"/>`:'';}).join('');
+    if(analysisMode==='section'&&resultDisplay){
+      const points=(resultSections.get(id)||[]).map(point=>mapMeshPoint(point,resultDisplay.reference,mesh)).filter(Boolean);
+      const referencePoints=resultSections.get(id)||[];
+      if(referencePoints.length===2){
+        const groups=[];let group=[];
+        for(let i=0;i<=100;i++){
+          const point=mapMeshPoint([0,1].map(axis=>referencePoints[0][axis]+i/100*(referencePoints[1][axis]-referencePoints[0][axis])),resultDisplay.reference,mesh);
+          if(point)group.push(point.join(','));else if(group.length){groups.push(group);group=[];}
+        }
+        if(group.length)groups.push(group);
+        svg.innerHTML+=groups.map(group=>`<polyline points="${group.join(' ')}" fill="none" stroke="#168256" stroke-width="${radius/2}"/>`).join('');
+      }
+      svg.innerHTML+=points.map(point=>`<circle cx="${point[0]}" cy="${point[1]}" r="${radius}" fill="#168256" stroke="white" stroke-width="${radius/3}"/>`).join('');
+    }
   }
-  function renderRunField(id,metadata,mesh){
-    const field=$('#run-field')?.value||metadata.fields?.[0]||'u_norm',frame=Number($('#run-frame')?.value||0);
-    const image=$('#run-field-image');if(!image)return;
-    const key=`${id}:${field}`,bounds=colorBounds.get(key),params=new URLSearchParams({field,frame:String(frame)});
-    if(kinematicFields.has(field)&&bounds){params.set('vmin',String(bounds[0]));params.set('vmax',String(bounds[1]));}
-    image.onload=()=>drawNodeOverlay(mesh,id);
-    image.src=`/api/runs/${encodeURIComponent(id)}/field-image?${params}`;
-    image.onerror=()=>{$('#run-field-info').textContent='Carte du champ indisponible pour cet instant.';};
-    const controls=$('#color-controls');controls.hidden=!kinematicFields.has(field);$('.run-field-frame').style.cursor=field==='Residual'?'default':'crosshair';
-    $('#color-min').value=bounds?.[0]??'';$('#color-max').value=bounds?.[1]??'';
-    const provenance=metadata.thermal_provenance?.[frame];
-    const validity=provenance?` · TH : ${htmlEscape(provenance.time_valid?'temps valide':'température absente')} · ${htmlEscape(provenance.valid_nodes??0)} nœuds valides`:'';
-    $('#run-field-info').innerHTML=`${htmlEscape(field)} · image VIS ${frame+1}/${metadata.times_s.length} · ${htmlEscape(kinematicFields.has(field)&&field.startsWith('u')?metadata.length_unit:field.startsWith('E')?'sans unité':metadata.temperature_unit||'')}${validity}`;
+  async function renderRunField(id, metadata, display) {
+    const request = ++fieldRequest;
+    const image = $('#run-field-image'), background = $('#run-background-image');
+    if (!image || !background) return;
+    const field = $('#run-field').value;
+    const residualFrames = metadata.residual_frames || metadata.times_s.map((_, index) => index).slice(1);
+    const residualAvailable = new Set(residualFrames);
+    if (field === 'Residual' && !residualAvailable.has(Number($('#run-frame').value))) {
+      const wanted=Number($('#run-frame').value);
+      $('#run-frame').value=String(residualFrames.reduce((best,index)=>Math.abs(index-wanted)<Math.abs(best-wanted)?index:best,residualFrames[0]));
+    }
+    const frame = Number($('#run-frame').value);
+    $('#run-frame-value').textContent=`${frame===0?'Réf. · ':''}${frame+1}/${metadata.times_s.length} · ${metadata.times_s[frame]} s`;
+    $('#run-frame').setAttribute('aria-valuetext',$('#run-frame-value').textContent);
+    if(analysisMode==='section')updateSectionGraph(id);
+    const backgroundSelect = $('#result-background');
+    const hasSourceShape = Array.isArray(metadata.source_shape_hw);
+    for (const option of backgroundSelect.options) {
+      option.disabled = option.value !== 'none' && !hasSourceShape;
+    }
+    if (!hasSourceShape) backgroundSelect.value = 'none';
+    const showBackground = backgroundSelect.value !== 'none';
+    const overlay = hasSourceShape ? 'current' : 'none';
+    image.hidden = true; background.hidden = true;
+    $('#run-node-overlay').replaceChildren();
+    const current = () => request === fieldRequest && image.isConnected && state.view === 'Résultats' && state.selectedRun === id;
+    const key = `${id}:${field}`, bounds = colorBounds.get(key);
+    const params = new URLSearchParams({field, frame: String(frame), overlay});
+    if (kinematicFields.has(field) && bounds) { params.set('vmin', bounds[0]); params.set('vmax', bounds[1]); }
+    if($('#color-zero').checked&&field!=='Residual')params.set('center_zero','true');
+    $('#color-controls').hidden = field==='Residual';
+    for(const control of ['color-min','color-max','range-image','range-sequence','range-auto'])$('#'+control).disabled=!kinematicFields.has(field);
+    $('.run-field-frame').style.cursor = field === 'Residual' ? 'default' : 'crosshair';
+    $('#color-min').value = bounds?.[0] ?? ''; $('#color-max').value = bounds?.[1] ?? '';
+    const provenance = metadata.thermal_provenance?.[frame];
+    const validity = provenance ? ` · TH : ${provenance.time_valid ? 'temps valide' : 'température absente'}` : '';
+    const unit = field === 'Residual' ? 'écart d’intensité VIS' : field.startsWith('u') ? metadata.length_unit : field.startsWith('E') ? 'sans unité' : metadata.temperature_unit || '';
+    const coordinates = overlay === 'current' ? ' · configuration déformée' + (field === 'Residual' ? ' · résidu transporté' : '') : ' · configuration de référence';
+    $('#run-field-info').replaceChildren();
+    $('#run-field-info').append(document.createTextNode(`${fieldLabel(field)} · image VIS ${frame + 1}/${metadata.times_s.length} · ${unit}${coordinates}${validity} `));
+    const fieldStatus = document.createElement('span'); fieldStatus.id = 'run-field-render-status'; fieldStatus.setAttribute('role', 'status');
+    const status = document.createElement('span'); status.id = 'run-background-status'; status.setAttribute('role', 'status');
+    $('#run-field-info').append(fieldStatus, status);
+    updateFieldAlpha();
+    try {
+      let mesh = display.reference;
+      if (overlay !== 'none') {
+        const geometryKey = `${overlay}:${frame}`;
+        if (!display.cache.has(geometryKey)) display.cache.set(geometryKey, api(`/api/runs/${encodeURIComponent(id)}/mesh?${new URLSearchParams({overlay,frame:String(frame)})}`).catch(error => { display.cache.delete(geometryKey); throw error; }));
+        mesh = await display.cache.get(geometryKey);
+      }
+      if (!current()) return;
+      display.mesh = mesh;
+      image.onload = () => { if (current()) { image.hidden = false; drawNodeOverlay(mesh, id); } };
+      image.onerror = () => { if (current()) { image.hidden = true; fieldStatus.textContent = ' · Carte indisponible pour cet instant.'; } };
+      image.src = `/api/runs/${encodeURIComponent(id)}/field-image?${params}`;
+      if (showBackground) {
+        background.onload = () => { if (current()) { background.hidden = false; status.textContent = ''; } };
+        background.onerror = () => { if (current()) { background.hidden = true; status.textContent = ' · Image VIS source absente ou modifiée ; le champ reste disponible.'; } };
+        background.src = `/api/runs/${encodeURIComponent(id)}/visible-image?frame=${frame}`;
+      } else background.removeAttribute('src');
+    } catch (error) {
+      if (current()) fieldStatus.textContent = ` · Affichage impossible : ${error.message}`;
+    }
   }
   async function updateHistoryGraph(id,field){
     const panel=$('#run-history');if(!panel)return;
@@ -1211,28 +1362,141 @@
       if(xmax===xmin)xmax=xmin+1;if(ymax===ymin){ymin-=0.5;ymax+=0.5;}
       const w=800,h=170,p=34,x=v=>p+(v-xmin)/(xmax-xmin)*(w-2*p),y=v=>h-p-(v-ymin)/(ymax-ymin)*(h-2*p);
       const lines=series.map((item,index)=>{const groups=[];let segment=[];for(const point of [...item.points,null]){if(point&&Number.isFinite(point.x))segment.push(point);else if(segment.length){groups.push(segment);segment=[];}}return groups.map(group=>`<polyline points="${group.map(q=>`${x(q.x)},${y(q.y)}`).join(' ')}" fill="none" stroke="${nodeColors[index%nodeColors.length]}" stroke-width="2" vector-effect="non-scaling-stroke"/>`).join('');}).join('');
-      panel.innerHTML=`<div class="history-chart"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Historique de ${htmlEscape(field)} pour ${nodes.length} nœuds"><line x1="${p}" y1="${h-p}" x2="${w-p}" y2="${h-p}" stroke="#b6c4b9"/>${lines}</svg><div class="history-range"><span>${htmlEscape(xmin.toPrecision(4))}–${htmlEscape(xmax.toPrecision(4))} s</span><span>${htmlEscape(ymin.toPrecision(4))}–${htmlEscape(ymax.toPrecision(4))}</span></div></div><div class="node-legend">${nodes.map((node,index)=>`<span><i style="background:${nodeColors[index%nodeColors.length]}"></i>Nœud ${node}</span>`).join('')}</div>`;
+      panel.innerHTML=`<div class="history-chart"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Historique de ${htmlEscape(field)} pour ${nodes.length} nœuds"><line x1="${p}" y1="${h-p}" x2="${w-p}" y2="${h-p}" stroke="#b6c4b9"/>${lines}</svg><div class="history-range"><span>${htmlEscape(xmin.toPrecision(4))}–${htmlEscape(xmax.toPrecision(4))} s</span><span>${htmlEscape(ymin.toPrecision(4))}–${htmlEscape(ymax.toPrecision(4))} ${htmlEscape(resultGraphUnit(field))}</span></div></div><div class="node-legend">${nodes.map((node,index)=>`<span><i style="background:${nodeColors[index%nodeColors.length]}"></i>Nœud ${node}</span>`).join('')}</div>`;
     }catch(error){if(request===historyRequest)panel.textContent=`Historique indisponible : ${error.message}`;}
+  }
+  function mapMeshPoint(point,source,target){
+    // Invert/transport the same affine triangles used by the field renderer.
+    for(const cell of source.elements||[]){
+      const triangles=cell.length===3?[cell]:[[cell[0],cell[1],cell[2]],[cell[0],cell[2],cell[3]]];
+      for(const ids of triangles){
+        const [a,b,c]=ids.map(index=>source.nodes_xy[index]);
+        const det=(b[1]-c[1])*(a[0]-c[0])+(c[0]-b[0])*(a[1]-c[1]);
+        if(Math.abs(det)<1e-14)continue;
+        const u=((b[1]-c[1])*(point[0]-c[0])+(c[0]-b[0])*(point[1]-c[1]))/det;
+        const v=((c[1]-a[1])*(point[0]-c[0])+(a[0]-c[0])*(point[1]-c[1]))/det,w=1-u-v;
+        if(Math.min(u,v,w)>=-1e-9)return [0,1].map(axis=>u*target.nodes_xy[ids[0]][axis]+v*target.nodes_xy[ids[1]][axis]+w*target.nodes_xy[ids[2]][axis]);
+      }
+    }
+    return null;
+  }
+  function resultGraphUnit(field){
+    return field.startsWith('u')?resultMetadata.length_unit:field.startsWith('E')?'sans unité':resultMetadata.temperature_unit||'';
+  }
+  function sectionParameters(id,scope='image'){
+    const points=resultSections.get(id)||[],samples=Number($('#section-samples').value);
+    if(points.length!==2)throw new Error('Placez les deux extrémités sur le maillage.');
+    if(Math.hypot(points[1][0]-points[0][0],points[1][1]-points[0][1])<1e-9)throw new Error('Les extrémités doivent être distinctes.');
+    if(!Number.isInteger(samples)||samples<2||samples>2000)throw new Error('Choisissez entre 2 et 2000 échantillons.');
+    return new URLSearchParams({field:$('#history-field').value,frame:$('#run-frame').value,x0:points[0][0],y0:points[0][1],x1:points[1][0],y1:points[1][1],samples,scope});
+  }
+  function updateAnalysisGraphs(id){
+    updateHistoryGraph(id,$('#history-field').value);
+    if(analysisMode==='section')updateSectionGraph(id);
+  }
+  async function downloadResultCSV(id,kind){
+    const button=$('#'+kind+'-csv');button.disabled=true;
+    try{
+      let params;
+      if(kind==='history'){
+        const nodes=[...selectedNodes(id)];
+        if(!nodes.length)throw new Error('Sélectionnez au moins un nœud.');
+        params=new URLSearchParams({nodes:nodes.join(','),field:$('#history-field').value});
+      }else params=sectionParameters(id,$('#section-scope').value);
+      const response=await fetch(`/api/runs/${encodeURIComponent(id)}/${kind==='history'?'histories':'section'}.csv?${params}`);
+      if(!response.ok){const error=await response.json();throw new Error(error.detail||'Export indisponible');}
+      const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');
+      link.href=url;link.download=`${id}-${kind}-${params.get('field')}.csv`;link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }catch(error){notify('Export CSV',error.message);}finally{button.disabled=false;}
+  }
+  function setupResultAnalysis(id,display){
+    const activate=mode=>{
+      analysisMode=mode;
+      for(const name of ['history','section']){
+        const selected=name===mode;
+        $('#tab-'+name).setAttribute('aria-selected',String(selected));
+        $('#tab-'+name).tabIndex=selected?0:-1;
+        $('#'+name+'-content').hidden=!selected;
+      }
+      drawNodeOverlay(display.mesh,id);updateAnalysisGraphs(id);
+    };
+    for(const name of ['history','section']){
+      $('#tab-'+name).addEventListener('click',()=>activate(name));
+      $('#tab-'+name).addEventListener('keydown',event=>{
+        if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){
+          event.preventDefault();const mode=event.key==='Home'?'history':event.key==='End'?'section':name==='history'?'section':'history';
+          activate(mode);$('#tab-'+mode).focus();
+        }
+      });
+      $('#'+name+'-csv').addEventListener('click',()=>downloadResultCSV(id,name));
+    }
+    $('#section-clear').addEventListener('click',()=>{resultSections.delete(id);drawNodeOverlay(display.mesh,id);updateSectionGraph(id);});
+    $('#section-samples').addEventListener('change',()=>updateSectionGraph(id));
+    activate(analysisMode);
+  }
+  async function updateSectionGraph(id){
+    const panel=$('#run-section');if(!panel)return;
+    const request=++sectionRequest,projectKey=state.projectKey;
+    const points=resultSections.get(id)||[];
+    $('#section-coordinates').textContent=points.map((p,index)=>`${index===0?'A':'B'} : (${p[0].toFixed(2)}, ${p[1].toFixed(2)}) px réf.`).join(' · ');
+    let params;
+    try{params=sectionParameters(id);}catch(error){panel.textContent=error.message;return;}
+    panel.textContent='Chargement de la coupe…';
+    try{
+      const data=await api(`/api/runs/${encodeURIComponent(id)}/section?${params}`);
+      if(request!==sectionRequest||projectKey!==state.projectKey||state.selectedRun!==id||!panel.isConnected)return;
+      const profile=data.profiles[0],values=profile.values,distances=profile.distance;
+      const finite=values.filter(value=>value!==null&&Number.isFinite(value));
+      if(!finite.length){panel.textContent='Aucune valeur finie sur cette coupe.';return;}
+      let low=Math.min(...finite),high=Math.max(...finite);if(high-low<1e-12*Math.max(1,Math.abs(low),Math.abs(high))){const delta=Math.max(Math.abs(low)*.01,1e-9);low-=delta;high+=delta;}
+      const width=800,height=230,p=42,length=distances.at(-1)||1;
+      const x=value=>p+value/length*(width-2*p),y=value=>height-p-(value-low)/(high-low)*(height-2*p);
+      const groups=[];let group=[];
+      for(let i=0;i<=values.length;i++){
+        if(i<values.length&&values[i]!==null&&Number.isFinite(values[i]))group.push(`${x(distances[i])},${y(values[i])}`);
+        else if(group.length){groups.push(group);group=[];}
+      }
+      panel.innerHTML=`<div class="history-chart"><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Coupe de ${htmlEscape(params.get('field'))}"><line x1="${p}" y1="${height-p}" x2="${width-p}" y2="${height-p}" stroke="#b6c4b9"/>${groups.map(points=>`<polyline points="${points.join(' ')}" fill="none" stroke="#168256" stroke-width="2" vector-effect="non-scaling-stroke"/>`).join('')}</svg><div class="history-range"><span>Distance A → B : 0–${length.toPrecision(4)} ${htmlEscape(data.length_unit)}</span><span>${low.toPrecision(4)}–${high.toPrecision(4)} ${htmlEscape(resultGraphUnit(params.get('field')))}</span></div></div><p>Image ${profile.frame+1} · ${htmlEscape(profile.time_s)} s · segment en référence</p>`;
+    }catch(error){if(request===sectionRequest&&panel.isConnected)panel.textContent=`Coupe indisponible : ${error.message}`;}
   }
   async function loadRunDetails(id){
     const panel=$('#run-fields');if(!panel)return;
     const projectKey=state.projectKey;
     panel.textContent='Chargement des champs…';
     try{
-      const [metadata,mesh]=await Promise.all([api(`/api/runs/${encodeURIComponent(id)}/fields`),api(`/api/runs/${encodeURIComponent(id)}/mesh`)]);
+      const metadata=await api(`/api/runs/${encodeURIComponent(id)}/fields`);
       if(state.selectedRun!==id||state.view!=='Résultats'||projectKey!==state.projectKey)return;
-      const fields=metadata.fields||[],times=metadata.times_s||[],historyFields=['u1','u2','u_norm','E11','E22','E12','Temperature','Delta_temperature'].filter(name=>fields.includes(name));
-      panel.innerHTML=`<div class="result-toolbar"><label>Champ<select id="run-field">${fields.map(name=>`<option value="${htmlEscape(name)}">${htmlEscape(name)}</option>`).join('')}</select></label><label>Instant VIS<select id="run-frame">${times.map((time,index)=>`<option value="${index}">${index===0?'Réf. · ':''}${htmlEscape(time)} s</option>`).join('')}</select></label><span>${htmlEscape(metadata.nodes)} nœuds</span></div><div id="color-controls" class="color-controls"><label>Min <input id="color-min" type="number" step="any" placeholder="Auto"></label><label>Max <input id="color-max" type="number" step="any" placeholder="Auto"></label><button class="button outline" id="range-image" type="button">Min/max image</button><button class="button outline" id="range-sequence" type="button">Min/max séquence</button><button class="button quiet" id="range-auto" type="button">Auto</button><span id="color-status" role="status"></span><span class="color-gradient" aria-hidden="true"></span></div><div class="run-field-frame"><img id="run-field-image" alt="Carte du champ sélectionné"><svg id="run-node-overlay" aria-label="Sélectionner des nœuds sur la carte"></svg></div><div id="run-field-info" class="run-field-info"></div><section class="history-panel"><div class="history-controls"><strong>Historique des nœuds</strong><label>Grandeur <select id="history-field">${historyFields.map(name=>`<option value="${htmlEscape(name)}">${htmlEscape(name)}</option>`).join('')}</select></label><span>Clic : ajouter · Maj + clic : retirer</span></div><div id="run-history" class="run-history"></div></section>`;
-      const refresh=()=>renderRunField(id,metadata,mesh);
-      $('#run-field').addEventListener('change',()=>{const field=$('#run-field').value;if(historyFields.includes(field))$('#history-field').value=field;refresh();updateHistoryGraph(id,$('#history-field').value);});
-      $('#run-frame').addEventListener('change',refresh);
-      $('#history-field').addEventListener('change',()=>updateHistoryGraph(id,$('#history-field').value));
+      if(Number(metadata.completed_frames||0)===0&&['pending','running'].includes(metadata.state)){
+        resultMetadata=metadata;
+        panel.innerHTML='<div class="empty-inline" role="status">Calcul en cours. Les résultats apparaîtront dès que la première image sera validée.</div>';
+        scheduleResultRefresh(id);return;
+      }
+      const mesh=await api(`/api/runs/${encodeURIComponent(id)}/mesh`);
+      if(state.selectedRun!==id||state.view!=='Résultats'||projectKey!==state.projectKey)return;
+      const fields=metadata.fields||[],times=metadata.times_s||[];let historyFields=['u1','u2','u_norm','E11','E22','E12','Temperature','Delta_temperature'].filter(name=>fields.includes(name));
+      panel.innerHTML=`<div class="result-toolbar"><label>Champ<select id="run-field">${fields.map(name=>`<option value="${htmlEscape(name)}">${htmlEscape(fieldLabel(name))}</option>`).join('')}</select></label><label class="frame-slider">Instant VIS<input id="run-frame" type="range" min="0" max="${Math.max(0,times.length-1)}" step="1" value="0"><output id="run-frame-value"></output></label><span>${htmlEscape(metadata.nodes)} nœuds</span><label>Fond VIS<select id="result-background"><option value="none">Sans image</option><option value="current">VIS de l’instant choisi</option></select></label><label>Opacité du champ α<input id="field-alpha" type="range" min="0" max="1" step="0.01" value="${resultFieldAlpha}" aria-label="Opacité du champ"><output id="field-alpha-value"></output></label></div><div id="color-controls" class="color-controls"><label><input id="color-zero" type="checkbox">Centrer sur 0</label><label>Min <input id="color-min" type="number" step="any" placeholder="Auto"></label><label>Max <input id="color-max" type="number" step="any" placeholder="Auto"></label><button class="button outline" id="range-image" type="button">Min/max image</button><button class="button outline" id="range-sequence" type="button">Min/max séquence</button><button class="button quiet" id="range-auto" type="button">Auto</button><span id="color-status" role="status"></span><span class="color-gradient" aria-hidden="true"></span></div><div class="run-field-frame"><div class="result-image-stack" data-image-stack><img id="run-background-image" alt="Image VIS source du résultat" hidden><img id="run-field-image" alt="Carte du champ sélectionné" hidden></div><svg id="run-node-overlay" aria-label="Sélectionner des nœuds sur la carte"></svg></div><div id="run-field-info" class="run-field-info"></div><section class="history-panel"><div class="analysis-tabs" role="tablist" aria-label="Analyse des résultats"><button type="button" id="tab-history" role="tab" aria-controls="history-content" aria-selected="true">Suivi de points</button><button type="button" id="tab-section" role="tab" aria-controls="section-content" aria-selected="false">Coupe</button></div><div class="history-controls"><label>Grandeur <select id="history-field">${historyFields.map(name=>`<option value="${htmlEscape(name)}">${htmlEscape(name)}</option>`).join('')}</select></label></div><div id="history-content" role="tabpanel" aria-labelledby="tab-history"><div class="history-controls"><span>Clic : ajouter · Maj + clic : retirer</span><button type="button" class="button outline" id="history-csv">Exporter CSV · toutes les images</button></div><div id="run-history" class="run-history"></div></div><div id="section-content" role="tabpanel" aria-labelledby="tab-section" hidden><div class="history-controls"><span>Deux clics sur le maillage : extrémités de la coupe matérielle.</span><button type="button" class="button quiet" id="section-clear">Nouvelle coupe</button><label>Échantillons <input id="section-samples" type="number" min="2" max="2000" step="1" value="200"></label><label>Export <select id="section-scope"><option value="image">Image courante</option><option value="sequence">Toutes les images</option></select></label><button type="button" class="button outline" id="section-csv">Exporter CSV</button></div><div id="section-coordinates"></div><div id="run-section" class="run-history"></div></div></section>`;
+      const display = {reference: mesh, mesh, cache: new Map(), historyFields};
+      const liveMetadata={...metadata};
+      resultMetadata = liveMetadata; resultDisplay = display; renderResultRunStatus(id,liveMetadata);
+      const storedBackground = localStorage.getItem('d2ic-result-background') || 'current';
+      $('#result-background').value = ['none','current'].includes(storedBackground) ? storedBackground : 'current';
+      const refresh = () => renderRunField(id, liveMetadata, display);
+      $('#result-background').addEventListener('change', () => { localStorage.setItem('d2ic-result-background', $('#result-background').value); refresh(); });
+      $('#field-alpha').addEventListener('input', () => { resultFieldAlpha = Number($('#field-alpha').value); localStorage.setItem('d2ic-result-field-alpha', String(resultFieldAlpha)); updateFieldAlpha(); });
+      $('#run-field').addEventListener('change',()=>{const field=$('#run-field').value;if(display.historyFields.includes(field))$('#history-field').value=field;refresh();updateAnalysisGraphs(id);});
+      $('#run-frame').addEventListener('input',refresh);
+      $('#color-zero').checked=localStorage.getItem('d2ic-color-zero')==='true';
+      $('#color-zero').addEventListener('change',()=>{localStorage.setItem('d2ic-color-zero',String($('#color-zero').checked));refresh();});
+      setupResultAnalysis(id,display);
+      $('#history-field').addEventListener('change',()=>updateAnalysisGraphs(id));
       const applyBounds=()=>{const low=Number($('#color-min').value),high=Number($('#color-max').value),status=$('#color-status');if(!$('#color-min').value||!$('#color-max').value||!Number.isFinite(low)||!Number.isFinite(high)||low>=high){status.textContent='Saisissez deux bornes finies avec min < max.';return;}colorBounds.set(`${id}:${$('#run-field').value}`,[low,high]);status.textContent='';refresh();};
       $('#color-min').addEventListener('change',applyBounds);$('#color-max').addEventListener('change',applyBounds);
       $('#range-auto').addEventListener('click',()=>{colorBounds.delete(`${id}:${$('#run-field').value}`);$('#color-status').textContent='Échelle automatique';refresh();});
       for(const scope of ['image','sequence'])$('#range-'+scope).addEventListener('click',async()=>{const field=$('#run-field').value,frame=$('#run-frame').value,status=$('#color-status');status.textContent='Calcul des bornes…';try{const range=await api(`/api/runs/${encodeURIComponent(id)}/field-range?${new URLSearchParams({field,frame,scope})}`);if(state.selectedRun!==id||$('#run-field')?.value!==field||(scope==='image'&&$('#run-frame')?.value!==frame))return;let low=range.min,high=range.max;if(low===high){const delta=Math.max(Math.abs(low)*0.01,1e-9);low-=delta;high+=delta;}colorBounds.set(`${id}:${field}`,[low,high]);status.textContent=`${scope==='image'?'Image':'Séquence'} : ${range.min.toPrecision(4)} à ${range.max.toPrecision(4)}`;refresh();}catch(error){status.textContent=error.message;}});
       $('.run-field-frame').addEventListener('click',event=>{
-        if($('#run-field').value==='Residual')return;
+        if($('#run-field').value==='Residual'||$('#run-field-image').hidden)return;
+        const mesh = display.mesh;
         const frame=event.currentTarget,image=$('#run-field-image');
         const geometry=fieldImageGeometry(frame,image);if(!geometry)return;
         const rect=frame.getBoundingClientRect(),localX=event.clientX-rect.left-frame.clientLeft;
@@ -1241,6 +1505,13 @@
         const extent=mesh.extent;
         const x=extent[0]+(localX-geometry.left)/geometry.width*(extent[1]-extent[0]);
         const y=extent[2]+(localY-geometry.top)/geometry.height*(extent[3]-extent[2]);
+        if(analysisMode==='section'){
+          const point=mapMeshPoint([x,y],mesh,display.reference);
+          if(!point){$('#run-section').textContent='Choisissez une extrémité dans le maillage.';return;}
+          const points=resultSections.get(id)||[];
+          resultSections.set(id,points.length===2?[point]:[...points,point]);
+          drawNodeOverlay(mesh,id);updateSectionGraph(id);return;
+        }
         const nodes=selectedNodes(id),candidates=event.shiftKey?[...nodes]:mesh.nodes_xy.map((_,index)=>index);
         let nearest=-1,distance=Infinity;
         for(const index of candidates){const point=mesh.nodes_xy[index];const d=(point[0]-x)**2+(point[1]-y)**2;if(d<distance){nearest=index;distance=d;}}
@@ -1248,10 +1519,50 @@
         if(event.shiftKey)nodes.delete(nearest);else nodes.add(nearest);
         drawNodeOverlay(mesh,id);updateHistoryGraph(id,$('#history-field').value);
       });
-      new ResizeObserver(()=>drawNodeOverlay(mesh,id)).observe($('.run-field-frame'));
-      $('.run-field-frame').addEventListener('imageviewchange',()=>drawNodeOverlay(mesh,id));
+      new ResizeObserver(()=>drawNodeOverlay(display.mesh,id)).observe($('.run-field-frame'));
+      $('.run-field-frame').addEventListener('imageviewchange',()=>drawNodeOverlay(display.mesh,id));
       refresh();updateHistoryGraph(id,$('#history-field').value);
+      scheduleResultRefresh(id);
     }catch(error){if(panel&&state.view==='Résultats')panel.textContent=`Champs indisponibles : ${error.message}`;}
+  }
+  function scheduleResultRefresh(id){
+    if(resultRefreshTimer)clearTimeout(resultRefreshTimer);
+    resultRefreshTimer=null;
+    if(state.view!=='Résultats'||state.selectedRun!==id)return;
+    const stateName=resultMetadata?.state;
+    if(!['pending','running'].includes(stateName))return;
+    resultRefreshTimer=setTimeout(()=>refreshRunResults(id),1500);
+  }
+  async function refreshRunResults(id){
+    if(state.view!=='Résultats'||state.selectedRun!==id||!resultMetadata)return;
+    const projectKey=state.projectKey;
+    try{
+      const metadata=await api(`/api/runs/${encodeURIComponent(id)}/fields`);
+      if(projectKey!==state.projectKey||state.view!=='Résultats'||state.selectedRun!==id)return;
+      const previous=resultMetadata, fields=$('#run-field'), frames=$('#run-frame');
+      const changed=JSON.stringify(previous.times_s)!==JSON.stringify(metadata.times_s)||JSON.stringify(previous.fields)!==JSON.stringify(metadata.fields);
+      Object.assign(previous,metadata);resultMetadata=previous;renderResultRunStatus(id,previous);
+      if(!fields&&Number(metadata.completed_frames||0)>0){await loadRunDetails(id);return;}
+      if(changed&&fields&&frames){
+        const selectedField=fields.value, selectedFrame=frames.value;
+        const nextFields=metadata.fields||[], nextTimes=metadata.times_s||[];
+        fields.replaceChildren(...nextFields.map(name=>{const option=document.createElement('option');option.value=name;option.textContent=fieldLabel(name);return option;}));
+        if(nextFields.includes(selectedField))fields.value=selectedField;
+        frames.max=String(Math.max(0,nextTimes.length-1));
+        if(Number(selectedFrame)<nextTimes.length)frames.value=selectedFrame;
+        const historySelect=$('#history-field'),selectedHistory=historySelect?.value;
+        if(historySelect){const historyFields=['u1','u2','u_norm','E11','E22','E12','Temperature','Delta_temperature'].filter(name=>nextFields.includes(name));if(resultDisplay)resultDisplay.historyFields=historyFields;historySelect.replaceChildren(...historyFields.map(name=>{const option=document.createElement('option');option.value=name;option.textContent=name;return option;}));if(historyFields.includes(selectedHistory))historySelect.value=selectedHistory;else if(historyFields.includes(fields.value))historySelect.value=fields.value;}
+        for(const key of [...historyCache.keys()])if(key.startsWith(`${id}:`))historyCache.delete(key);
+        historyRequest++; resultDisplay?.cache.clear();
+        if(resultDisplay)renderRunField(id,metadata,resultDisplay);
+        updateAnalysisGraphs(id);
+      }
+      if(!metadata.times_s?.length&&['pending','running'].includes(metadata.state)){
+        const panel=$('#run-fields');
+        if(panel&&!fields)panel.innerHTML='<div class="empty-inline" role="status">Calcul en cours. Les résultats apparaîtront dès que la première image sera validée.</div>';
+      }
+    }catch(error){const panel=$('#run-fields');if(panel&&state.view==='Résultats')panel.dataset.refreshError=error.message;}
+    scheduleResultRefresh(id);
   }
   let runListTimer=null;
   async function runAction(id,action){
@@ -1260,33 +1571,60 @@
     try{const route=`/api/runs/${encodeURIComponent(id)}`+(action==='restart'?'/resume':action==='stop'?'/cancel':'');await api(route,{method:action==='delete'?'DELETE':'POST',body:action==='delete'?undefined:'{}'});if(action==='delete'){resultNodes.delete(id);for(const key of [...historyCache.keys()])if(key.startsWith(`${id}:`))historyCache.delete(key);for(const key of [...colorBounds.keys()])if(key.startsWith(`${id}:`))colorBounds.delete(key);if(state.selectedRun===id)rememberRun(null);}if(action==='restart')rememberRun(id);await populateRuns();}
     catch(error){if(host)host.textContent=`Action impossible pour ${id} : ${error.message}`;}
   }
+  function renderRunPreparation(run){
+    const required=run.preparation?.required||[],optional=run.preparation?.optional||[];
+    const runtimeError=run.error&&!required.some(item=>item.message===run.error)?`<li class="run-preparation-error">Erreur · ${htmlEscape(run.error)}</li>`:'';
+    const issues=[...required.map(item=>`<li class="run-preparation-error">Erreur · ${htmlEscape(item.view)} : ${htmlEscape(item.message)}</li>`),...optional.map(item=>`<li class="run-preparation-warning">Avertissement · ${htmlEscape(item.view)} : ${htmlEscape(item.message)}</li>`),runtimeError].join('');
+    return issues?`<ul class="run-preparation">${issues}</ul>`:'';
+  }
   async function populateRuns(){
     const host=$('#run-list');if(!host)return;
     if(runListTimer){clearTimeout(runListTimer);runListTimer=null;}
     try{
       const projectKey=state.projectKey,runs=recordsFrom(await api('/api/runs'));
       if(projectKey!==state.projectKey||state.view!=='Job Manager')return;
-      if(!runs.length){host.innerHTML='<div class="empty-inline">Aucun run dans cette étude.</div>';rememberRun(null);$('#run-status').textContent='Lancez un calcul pour créer un run.';return;}
+      refreshReadiness();
+      if(!runs.length){host.innerHTML='<div class="empty-inline">Aucun job dans cette étude.</div>';rememberRun(null);$('#run-status').textContent='Préparez un job pour vérifier les prérequis et créer sa ligne.';return;}
       const preferred=state.selectedRun||localStorage.getItem(selectedRunStorageKey());if(preferred&&!state.selectedRun)rememberRun(preferred);
       if(preferred&&!runs.some(run=>run.id===preferred))rememberRun(null);
-      host.innerHTML=runs.map(run=>{const id=run.id||run.run_id||run.name,active=id===state.selectedRun,runState=run.state||run.status||'pending';const count=run.total_frames?` · ${run.completed_frames||0}/${run.total_frames} images`:'';return `<div class="run-row ${active?'selected':''}" data-run-id="${htmlEscape(id)}"><button type="button" class="run-select" aria-pressed="${active}" aria-label="Afficher l’état du run ${htmlEscape(id)}"><strong>${htmlEscape(id)}</strong><small>${htmlEscape(runState+count)} · ${htmlEscape(run.updated_utc||'')}</small></button><div class="run-actions"><button type="button" class="button outline" data-run-result ${runState==='completed'?'':'disabled title="Résultats disponibles après la fin du calcul"'}>Résultats</button><button type="button" class="button outline" data-run-action="stop" ${runState==='running'?'':'disabled'}>Stop</button><button type="button" class="button outline" data-run-action="restart" ${['failed','cancelled'].includes(runState)?'':'disabled'}>Redémarrer</button><button type="button" class="button outline danger" data-run-action="delete" ${runState==='running'?'disabled':''}>Supprimer</button></div></div>`;}).join('');
+      host.innerHTML=runs.map(run=>{const id=run.id||run.run_id||run.name,active=id===state.selectedRun,runState=run.state||run.status||'pending';const stateLabel={pending:'Prêt',preparing:'Préparation',blocked:'Erreur de préparation',running:'En cours',completed:'Terminé',failed:'Échec',cancelled:'Arrêté'}[runState]||runState;const count=run.total_frames?` · ${run.completed_frames||0}/${run.total_frames} images`:'';const available=Boolean(run.results_available||run.completed_frames>0||runState==='completed');return `<div class="run-row ${active?'selected':''}" data-run-id="${htmlEscape(id)}"><button type="button" class="run-select" aria-pressed="${active}" aria-label="Afficher l’état du run ${htmlEscape(id)}"><strong>${htmlEscape(id)}</strong><small>${htmlEscape(stateLabel+count)} · ${htmlEscape(run.updated_utc||'')}</small></button><div class="run-actions"><button type="button" class="button primary" data-run-start ${run.can_start?'':'disabled'}>Lancer</button><button type="button" class="button outline" data-run-action="stop" ${runState==='running'?'':'disabled'}>Stop</button><button type="button" class="button outline" data-run-action="restart" ${['failed','cancelled'].includes(runState)?'':'disabled'}>Redémarrer</button><button type="button" class="button outline danger" data-run-action="delete" ${['preparing','running'].includes(runState)?'disabled':''}>Supprimer</button><button type="button" class="button outline" data-run-result ${available?'':'disabled title="Résultats disponibles après la première image validée"'}>Résultats</button></div>${renderRunPreparation(run)}</div>`;}).join('');
       host.querySelectorAll('.run-select').forEach(button=>button.addEventListener('click',()=>{const id=button.closest('.run-row').dataset.runId;rememberRun(id);host.querySelectorAll('.run-row').forEach(row=>{row.classList.toggle('selected',row.dataset.runId===id);row.querySelector('.run-select').setAttribute('aria-pressed',String(row.dataset.runId===id));});const run=runs.find(row=>row.id===id);if(run)renderRunSummary(run);}));
       host.querySelectorAll('[data-run-result]').forEach(button=>button.addEventListener('click',()=>{rememberRun(button.closest('.run-row').dataset.runId);selectView('Résultats');}));
+      host.querySelectorAll('[data-run-start]').forEach(button=>button.addEventListener('click',()=>launchRun(button.closest('.run-row').dataset.runId)));
       host.querySelectorAll('[data-run-action]').forEach(button=>button.addEventListener('click',()=>runAction(button.closest('.run-row').dataset.runId,button.dataset.runAction)));
       const selected=runs.find(run=>run.id===state.selectedRun);if(selected)renderRunSummary(selected);else $('#run-status').textContent='Sélectionnez un run pour consulter son état.';
-      if(runs.some(run=>['pending','running'].includes(run.state)))runListTimer=setTimeout(()=>{if(state.view==='Job Manager')populateRuns();},1500);
+      if(runs.some(run=>['preparing','running'].includes(run.state)))runListTimer=setTimeout(()=>{if(state.view==='Job Manager')populateRuns();},1500);
     }catch(error){host.innerHTML=`<div class="empty-inline">Liste des runs indisponible : ${htmlEscape(error.message)}</div>`;}
   }
   async function loadJobManager(){
-    setStage(`<div class="results-view job-view"><div class="results-head"><span class="eyebrow">CALCULS DE L’ÉTUDE</span><button class="button primary" id="launch-run">Lancer le calcul</button></div><div id="run-status" class="run-summary">Sélectionnez un run pour consulter son état.</div><div id="run-list" class="run-list"></div></div>`);
-    $('#launch-run').addEventListener('click',launchRun);await populateRuns();
+    setStage(`<div class="results-view job-view"><div class="results-head"><span class="eyebrow">CALCULS DE L’ÉTUDE</span><div class="readiness-actions"><button class="button primary" id="prepare-run">Préparer le job</button></div></div><div id="run-status" class="run-summary">Préparez un job pour vérifier les prérequis et créer sa ligne.</div><div id="run-list" class="run-list"></div></div>`);
+    $('#prepare-run').addEventListener('click',prepareRun);
+    await Promise.all([refreshReadiness(), populateRuns()]);
   }
   async function loadResults(){
-    setStage(`<div class="results-view result-view"><div class="result-view-head"><strong id="result-run-name">Résultats</strong><button class="button outline" id="back-to-jobs">Job Manager</button></div><div id="run-fields" class="run-fields"></div></div>`);
+    setStage(`<div class="results-view result-view"><div class="result-view-head"><div><strong id="result-run-name">Résultats</strong><small id="result-run-progress"></small></div><button class="button outline" id="back-to-jobs">Job Manager</button></div><div id="run-fields" class="run-fields"></div></div>`);
     $('#back-to-jobs').addEventListener('click',()=>selectView('Job Manager'));
-    try{const projectKey=state.projectKey,runs=recordsFrom(await api('/api/runs'));if(projectKey!==state.projectKey||state.view!=='Résultats')return;const completed=runs.filter(run=>run.state==='completed');let id=state.selectedRun||localStorage.getItem(selectedRunStorageKey());if(!completed.some(run=>run.id===id))id=completed[0]?.id;if(!id){$('#run-fields').innerHTML='<div class="empty-inline">Aucun résultat disponible. Lancez un calcul dans Job Manager.</div>';return;}rememberRun(id);$('#result-run-name').textContent=id;await loadRunDetails(id);}catch(error){$('#run-fields').textContent=`Résultats indisponibles : ${error.message}`;}
+    if(resultRefreshTimer)clearTimeout(resultRefreshTimer);resultRefreshTimer=null;resultMetadata=null;resultDisplay=null;
+    try{const projectKey=state.projectKey,runs=recordsFrom(await api('/api/runs'));if(projectKey!==state.projectKey||state.view!=='Résultats')return;let id=state.selectedRun||localStorage.getItem(selectedRunStorageKey());let run=runs.find(item=>(item.id||item.run_id)===id);if(!run||!['pending','running'].includes(run.state||run.status)&&!(run.results_available||run.completed_frames>0||run.state==='completed')){run=runs.find(item=>item.results_available||item.completed_frames>0||item.state==='completed')||runs.find(item=>['pending','running'].includes(item.state));id=run?.id||run?.run_id;}if(!id){$('#run-fields').innerHTML='<div class="empty-inline">Aucun calcul disponible. Lancez un calcul dans Job Manager.</div>';return;}rememberRun(id);$('#result-run-name').textContent='Résultats';renderResultRunStatus(id,run);if(!(run.results_available||run.completed_frames>0||run.state==='completed')){$('#run-fields').innerHTML='<div class="empty-inline" role="status">Calcul en préparation. Les résultats apparaîtront dès que le maillage sera prêt.</div>';scheduleRunAvailability(id);return;}await loadRunDetails(id);}catch(error){$('#run-fields').textContent=`Résultats indisponibles : ${error.message}`;}
   }
-  function reflectField(path,value){const input=document.querySelector(`[data-path="${path}"]`);if(!input)return;if(input.type==='checkbox')input.checked=Boolean(value);else input.value=Array.isArray(value)?JSON.stringify(value):String(value??'');}
+  function scheduleRunAvailability(id){
+    if(resultRefreshTimer)clearTimeout(resultRefreshTimer);
+    const projectKey=state.projectKey;
+    resultRefreshTimer=setTimeout(async()=>{
+      if(state.projectKey!==projectKey||state.view!=='Résultats'||state.selectedRun!==id)return;
+      try{
+        const runs=recordsFrom(await api('/api/runs'));
+        if(state.projectKey!==projectKey||state.view!=='Résultats'||state.selectedRun!==id)return;
+        const run=runs.find(item=>(item.id||item.run_id)===id);
+        if(!run){$('#run-fields').innerHTML='<div class="empty-inline" role="status">Ce run n’est plus disponible.</div>';return;}
+        if(['failed','cancelled'].includes(run.state||run.status)&&!run.results_available&&!run.completed_frames){renderResultRunStatus(id,run);$('#run-fields').innerHTML=`<div class="empty-inline" role="status">Calcul ${run.state==='failed'?'en échec':'arrêté'} avant la disponibilité des résultats.</div>`;return;}
+        if(run.results_available||run.completed_frames>0||run.state==='completed')await loadResults();
+        else scheduleRunAvailability(id);
+      }catch{if(state.projectKey===projectKey&&state.view==='Résultats'&&state.selectedRun===id)scheduleRunAvailability(id);}
+    },1500);
+  }
+  function renderResultRunStatus(id,metadata){const host=$('#result-run-progress');if(!host)return;const labels={pending:'En attente',running:'En cours',completed:'Terminé',failed:'Échec',cancelled:'Arrêté'};const stateName=metadata.state||'pending',completed=Number(metadata.completed_frames)||0,total=Number(metadata.total_frames)||0;host.textContent=`${id} · ${labels[stateName]||stateName} · ${completed}/${total||'—'} images`;}
+  function reflectField(path,value){const input=document.querySelector(`[data-path="${path}"]`);if(!input)return;if(input.type==='checkbox')input.checked=Boolean(value);else if(input.multiple)Array.from(input.options).forEach(option=>{option.selected=value.includes(option.value);});else input.value=Array.isArray(value)?JSON.stringify(value):String(value??'');}
   let scaleResizeObserver = null;
   function setupScaleCanvas() {
     const image = $('#dic-image'), canvas = $('#scale-canvas');
@@ -1483,7 +1821,7 @@
       const images = recordsFrom(data);
       if (!path) path = recordPath(images[0]);
       const active = images.length - (state.config.paths?.excluded_images || []).length;
-      setStage(`<div class="dic-view"><div class="dic-preview"><img id="dic-image" class="preview-image" alt="Référence VIS pour l’étalonnage" src="${htmlEscape(imageUrl(path, true, true))}"><canvas id="scale-canvas" aria-label="Tracer et retoucher le segment d’échelle. Flèches pour déplacer l’extrémité sélectionnée."></canvas><canvas id="scale-magnifier" width="156" height="156" hidden aria-hidden="true"></canvas></div><div class="dic-summary"><span class="eyebrow">PRÉPARATION DIC</span><h2>${active} images VIS actives sur ${images.length}</h2><p id="scale-current"></p><div class="scale-tool"><strong>Mesurer un segment connu</strong><p class="scale-instructions">Cliquez deux extrémités sur l’image. Glissez une poignée pour la retoucher ; la loupe reste visible tant que le point est sélectionné. Flèches : 1 px, Maj + flèches : 10 px.</p><div id="scale-coordinates" class="scale-coordinates"></div><label>Longueur réelle <input id="segment-length-mm" type="number" min="0" step="any" value="${htmlEscape(state.config.scale?.segment_length_mm ?? 0)}"> mm</label><div id="scale-preview" class="inline-status"></div><div class="scale-actions"><button class="button outline" id="clear-segment">Effacer le segment</button><button class="button primary" id="confirm-scale">Confirmer l’échelle</button></div></div><button class="button outline" id="show-dic-settings">Ouvrir les paramètres DIC</button></div></div>`);
+      setStage(`<div class="dic-view"><div class="dic-preview">${imageMarkup(path, 'Référence VIS pour l’étalonnage', true, true, false, 'dic-image')}<canvas id="scale-canvas" aria-label="Tracer et retoucher le segment d’échelle. Flèches pour déplacer l’extrémité sélectionnée."></canvas><canvas id="scale-magnifier" width="156" height="156" hidden aria-hidden="true"></canvas></div><div class="dic-summary"><span class="eyebrow">PRÉPARATION DIC</span><h2>${active} images VIS actives sur ${images.length}</h2><p id="scale-current"></p><div class="scale-tool"><strong>Mesurer un segment connu</strong><p class="scale-instructions">Cliquez deux extrémités sur l’image. Glissez une poignée pour la retoucher ; la loupe reste visible tant que le point est sélectionné. Flèches : 1 px, Maj + flèches : 10 px.</p><div id="scale-coordinates" class="scale-coordinates"></div><label>Longueur réelle <input id="segment-length-mm" type="number" min="0" step="any" value="${htmlEscape(state.config.scale?.segment_length_mm ?? 0)}"> mm</label><div id="scale-preview" class="inline-status"></div><div class="scale-actions"><button class="button outline" id="clear-segment">Effacer le segment</button><button class="button primary" id="confirm-scale">Confirmer l’échelle</button></div></div><button class="button outline" id="show-dic-settings">Ouvrir les paramètres DIC</button></div></div>`);
       const scaleCanvas = setupScaleCanvas();
       $('#segment-length-mm').addEventListener('input', () => {
         const value = Number($('#segment-length-mm').value) || 0;
@@ -1551,7 +1889,7 @@
     $('#export-run').addEventListener('click',()=>show(false));
     $('#export-npz').addEventListener('click',()=>show(true));
   }
-  async function loadViewContent(view){if(view==='VIS')return loadVisible();if(view==='Thermique')return loadThermal();if(view==='ROI')return loadROI();if(view==='Synchro')return loadSynchronization();if(view==='Job Manager')return loadJobManager();if(view==='Résultats')return loadResults();if(view==='Échelle')return loadDicView();if(view==='Réglages DIC')return loadDicSettingsView();if(view==='Export')return loadExportView();}
+  async function loadViewContent(view){if(['Thermique','Synchro'].includes(view)&&state.config.project?.mode!=='dic_thermal'){setStage('<div class="empty-visual"><h2>Étape inactive</h2><p>Choisissez le parcours DIC + thermique pour préparer les images TH et leur synchronisation.</p></div>');return;}if(view==='VIS')return loadVisible();if(view==='Thermique')return loadThermal();if(view==='ROI')return loadROI();if(view==='Synchro')return loadSynchronization();if(view==='Job Manager')return loadJobManager();if(view==='Résultats')return loadResults();if(view==='Échelle')return loadDicView();if(view==='Réglages DIC')return loadDicSettingsView();if(view==='Export')return loadExportView();}
 
   let applyWorkspaceColumns = null;
   function setSettingsExpanded(expanded) {
@@ -1610,7 +1948,6 @@
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); setFileMenuOpen(false); save(); }
   });
   $('#save-study').addEventListener('click', save); $('#save-config').addEventListener('click', save);
-  $('#field-search').addEventListener('input', filterFields);
   const collapseNav = $('#collapse-nav');
   function setNavigationExpanded(expanded) {
     document.body.classList.toggle('nav-collapsed', !expanded);
@@ -1666,10 +2003,10 @@
       $('#config-message').textContent = 'Sources relocalisées après vérification.';
     } catch (error) { $('#config-message').textContent = 'Relocalisation impossible : ' + error.message; }
   });
+  $('#readiness-close').addEventListener('click', () => $('#readiness-dialog').close());
+  window.addEventListener('focus', () => { if (state.config.project) scheduleReadiness(); });
   $('#recent-runs').addEventListener('click', () => selectView('Job Manager'));
   $('#project-mode').addEventListener('change', () => { state.config.project.mode=$('#project-mode').value; renderFields(); setDirty(); if(state.view==='Thermique'||state.view==='Synchro')state.view='VIS'; selectView(state.view); });
-  $('#field-search').addEventListener('keydown', event => { if (event.key === 'Escape') { event.target.value = ''; filterFields(); } });
-  document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('#field-search').focus(); } });
   new MutationObserver(setupImageViews).observe($('#stage-content'), { childList: true, subtree: true });
   setupSplitter(); load().then(()=>loadViewContent('VIS'));
 })();

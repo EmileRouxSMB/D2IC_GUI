@@ -175,13 +175,14 @@ def _fuse_thermal(run, manifest):
     if not manifest['reference_temperature_available']:
         manifest['reference_temperature_warning'] = 'T_ref indisponible au premier temps VIS ; Delta_temperature reste absent'
     output = run/'results'
-    np.savez_compressed(output/'thermal_fields.npz',
+    np.savez_compressed(output/'thermal_fields.pending.npz',
         temperature=np.stack([state['temperature'] for state in states]),
         delta_temperature=np.stack([state['delta_temperature'] for state in states]),
         thermal_valid=np.stack([state['thermal_valid'] for state in states]),
         temperature_element=np.stack([state['temperature_element'] for state in states]),
         delta_temperature_element=np.stack([state['delta_temperature_element'] for state in states]),
         thermal_valid_element=np.stack([state['thermal_valid_element'] for state in states]))
+    (output/'thermal_fields.pending.npz').replace(output/'thermal_fields.npz')
     manifest['thermal_npz'] = str((output/'thermal_fields.npz').resolve())
     datasets = []
     provenance = []
@@ -247,7 +248,9 @@ def run_worker(run):
         _rebuild_pvd(run, manifest)
         if manifest['mode'] == 'dic_thermal':
             _fuse_thermal(run, manifest)
-        manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+        temporary_manifest = manifest_path.with_suffix('.tmp')
+        temporary_manifest.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+        temporary_manifest.replace(manifest_path)
         write_status(run, 'completed', dic_store=str(store_path.resolve()))
     except BaseException as error:
         write_status(run, 'failed', error=str(error), traceback=traceback.format_exc())

@@ -39,7 +39,7 @@ Le dossier contient le GUI local, ses tests, les spécifications scientifique, t
 
 Les nouveaux runs GUI écrivent `results/dic_store/` : `metadata.json` (schéma versionné, conventions, temps VIS), `mesh.npz`, `roi.npz`, une archive par image déformée dans `frames/`, `checkpoint.npz` et `progress.json`. Le déplacement et la déformation de référence sont implicites et n'occupent pas de frame. Le GUI lit ce magasin via `d2ic.io.result_store.open_result_store`; les anciens runs `dic_results.npz` restent lisibles. L'archive globale est exportée seulement à la demande pour les consommateurs scientifiques existants ; le worker GUI lit directement le magasin versionné.
 
-Un run interrompu peut être relancé depuis son dossier figé. D2IC compare l'empreinte des entrées et les paramètres avant de réutiliser les champs déjà validés. Les vues de champs utilisent un cache PNG local à chaque run terminé. Les VTU en pixels sont gardés comme données sources ; les éventuels VTU en mm sont des sorties distinctes afin que leur régénération soit idempotente.
+Un run interrompu peut être relancé depuis son dossier figé. D2IC compare l'empreinte des entrées et les paramètres avant de réutiliser les champs déjà validés. Les vues de champs utilisent un cache PNG local pour chaque frame validée, même pendant le calcul. Les VTU en pixels sont gardés comme données sources ; les éventuels VTU en mm sont des sorties distinctes afin que leur régénération soit idempotente.
 
 La commande « Relocaliser » vérifie les noms, tailles et dimensions des images référencées par le dernier run avant de changer les chemins VIS/TH de l'étude. Les manifestes des anciens runs conservent leurs chemins historiques ; la reprise d'un run déplacé reste soumise à l'empreinte de ses sources et peut donc être refusée. Les nouveaux calculs utilisent les nouveaux dossiers.
 
@@ -87,3 +87,38 @@ La vue Synchro affiche les cadences VIS/TH, les numéros d’acquisition conserv
 ## Zoom des images
 
 `static/image_zoom.js` fournit le zoom par clic ou fenêtre rectangulaire, Ctrl/Cmd + clic pour dézoomer et Réinitialiser la vue. Les calques ROI sont transformés ensemble ; les coordonnées natives des mesures, des points homologues et des nœuds sont obtenues avec la géométrie de l’image transformée. Le mode Zoom est désactivé initialement dans les vues interactives afin de conserver le placement des points ; il est activable dans leur barre d’image. Les préférences de zoom sont visuelles et ne modifient ni TOML ni résultats. Le retrait d’un nœud dans Résultats utilise maintenant Maj + clic.
+
+
+## Préparation avant lancement
+
+`readiness.py` évalue en lecture seule les prérequis du formulaire et renvoie les états par volet, les obligations et les compléments facultatifs. `POST /api/readiness` alimente les icônes et la fenêtre de guidage ; `POST /api/runs` répète les contrôles sur la configuration enregistrée avant de créer un run. Un maillage prévisualisé doit correspondre aux empreintes des masques et aux paramètres courants ; l’échelle est facultative en pixels, obligatoire en mm. Les températures sans encadrement restent absentes et constituent un avertissement. La lecture complète des sources au lancement reste assurée par `prepare_run` ; le suivi ne crée aucun dossier de run. La recherche de paramètres est supprimée des volets.
+
+Le contrôle vérifie aussi que la morphologie courante reproduit le masque final et que l’érosion photométrique conserve des pixels après binning et retrait des îlots. Les événements temporels sont contrôlés sur les acquisitions réellement retenues après stride, avec les mêmes numéros que le manifeste consommé par le worker. Un run actif bloque un nouveau lancement ; les vues Résultats/Export restent grises avant tout résultat terminé.
+
+
+## Superposition des résultats en configuration déformée
+
+Les routes de résultats acceptent `overlay=current` pour un PNG RGBA et un maillage d’affichage en coordonnées VIS natives sur tout le domaine image. La géométrie est `X + u_k` (déplacement brut en pixels) ; les valeurs colorées gardent les unités du run. `/api/runs/{id}/visible-image?frame=k` sert uniquement la source VIS enregistrée pour cet instant, avec vérification taille/date/dimensions. `/fields` expose `source_shape_hw` et `residual_frames` (clés NPZ consultées sans décompression des champs).
+
+`_transport_reference_raster` sert uniquement à visualiser les résidus sur la configuration déformée : inversion de la transformation affine sur les triangles du maillage déplacé, puis lecture au plus proche voisin de la carte de référence binnée. Le traitement se fait par blocs de lignes pour borner la mémoire. Les trous NaN et le domaine extérieur restent transparents ; le binning utilise les centres des blocs complets. La carte stockée n’est jamais réécrite. Les aperçus de superposition utilisent un cache `v5` distinct de l’ancien cadrage `v3`.
+
+
+## Catalogue des paramètres
+
+`parameters.toml` est la source des définitions des champs (clé, libellé, type explicite, défaut, choix, aide, onglet, navigateur, visibilité). `schema.load_catalog` le lit au démarrage ; `defaults`, `validate` et `/api/schema` réutilisent ces définitions. `config.toml` garde les valeurs par étude. Les règles scientifiques entre champs restent dans `validate`. Ajouter un contrôle standard demande seulement une entrée TOML ; un nouveau comportement de calcul demande son raccordement au moteur. Voir `CONFIG_SCHEMA.md`. Le catalogue est inclus dans les wheels et les copies de construction portables.
+
+
+## Consultation pendant le calcul
+
+Les routes de champs, maillage, bornes, image VIS et historiques acceptent les runs actifs, arrêtés ou échoués. La borne temporelle est `store.frame_count` (fichiers contigus, progression et checkpoint), jamais le nombre total prévu au manifeste. `/fields` retourne état, nombres validé/total et temps disponibles ; les historiques sont tronqués à ces mêmes temps. Les exports finaux restent réservés aux runs terminés. `inspect_run` fournit le manifeste figé dans tous les états. Le worker publie par remplacement atomique le manifeste final et `thermal_fields.npz`, consultés en parallèle ; les champs thermiques apparaissent après fusion complète.
+
+
+Le panneau Résultats regroupe Suivi de points / Coupe dans des sous-onglets. `/api/runs/{id}/section` échantillonne un segment matériel en pixels référence, par interpolation linéaire des triangles de visualisation (quadrilatères divisés 012/023), avec distance en unité du run et lacunes nulles. Les routes `section.csv` et `histories.csv` exportent la grandeur sélectionnée, les temps VIS et les unités ; la coupe accepte image/séquence, les points couvrent tous les instants validés. Le slider remplace le choix de frame ; `field-image?center_zero=true` impose des bornes symétriques sans toucher aux données persistées.
+
+
+Le blocage de lancement après changement de binning indique les anciennes/nouvelles valeurs et demande de cliquer sur Mailler. Job Manager affiche directement les obligations dans son résumé, près du bouton désactivé ; le contrôle de péremption reste strict.
+
+
+## Jobs préparés
+
+`dic_run.prepare_job` alloue la ligne avant les contrôles. Un rapport `preparation.json` publié atomiquement conserve les erreurs et avertissements. Les états `preparing`, `blocked`, `pending` précèdent le worker. `POST /api/runs/prepare` ne lance aucun calcul ; `POST /api/runs/{id}/start` vérifie les sources externes et les actifs figés avant lancement. Les mêmes paramètres sont utilisés pour readiness et snapshot ; le masque copié doit correspondre à l’aperçu contrôlé. La liste expose `preparation` et `can_start`. Corriger l’étude puis préparer un nouveau job pour remplacer une préparation bloquée. Les jobs préparés restent indépendants des modifications ultérieures de l’étude. Le verrou de démarrage est partagé par lancement, reprise et suppression ; un seul worker actif par étude. La route historique `POST /api/runs` reste disponible pour compatibilité.
