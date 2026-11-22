@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(require('node:path').join(__dirname, '../static/app.js'), 'utf8');
+const source = fs.readFileSync(require('node:path').join(__dirname, '../src/D2IC_GUI/static/app.js'), 'utf8');
 const launch = source.slice(source.indexOf('  async function prepareRun('), source.indexOf('  function renderRunSummary'));
 function harness(report) {
   const calls = [], nodes = {'#run-status': {}, '#config-message': {textContent: 'Invalid settings'}};

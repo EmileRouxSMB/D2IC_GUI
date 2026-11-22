@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { attach, _math, geometry } = require('../static/image_zoom.js');
+const { attach, _math, geometry } = require('../src/D2IC_GUI/static/image_zoom.js');
 
 test('rectangle zoom fits selection and preserves aspect ratio', () => {
   const state = { zoom: 1, tx: 0, ty: 0 };

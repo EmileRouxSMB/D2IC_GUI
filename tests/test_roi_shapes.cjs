@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {imagePoint, makeShape} = require('../static/roi_shapes.js');
+const {imagePoint, makeShape} = require('../src/D2IC_GUI/static/roi_shapes.js');
 
 test('drawing coordinates stay in original image pixels after a zoom and translation', () => {
   const box = {left: -100, top: -50, width: 800, height: 400};

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {mapMeshPoint, sectionParameters} = require('../static/result_analysis.js');
+const {mapMeshPoint, sectionParameters} = require('../src/D2IC_GUI/static/result_analysis.js');
 
 test('section click maps deformed pixels back to material coordinates', () => {
   const reference = {nodes_xy: [[0, 0], [4, 0], [4, 3], [0, 3]], elements: [[0, 1, 2, 3]]};

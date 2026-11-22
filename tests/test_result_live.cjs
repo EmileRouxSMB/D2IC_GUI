@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../src/D2IC_GUI/static/app.js'), 'utf8');
 const start = source.indexOf('  async function refreshRunResults(');
 const end = source.indexOf('  let runListTimer=', start);
 const refresh = source.slice(start, end);

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from functools import lru_cache
@@ -12,10 +13,15 @@ from pathlib import Path
 
 import numpy as np
 
-# In a source checkout, the outer im_jax/ directory shadows the actual
-# im_jax package unless its project root is on the worker's import path.
-_LOCAL_IM_JAX = Path(__file__).resolve().parents[1] / 'im_jax'
-if (_LOCAL_IM_JAX / 'im_jax' / '__init__.py').is_file():
+# Prefer the installed interpolation package. A source checkout may expose
+# the outer im_jax/ directory as a namespace; only that case needs a fallback.
+_PACKAGE_DIR = Path(__file__).resolve().parent
+_CHECKOUT = _PACKAGE_DIR.parent.parent
+_LOCAL_IM_JAX = _CHECKOUT.parent / 'im_jax'
+_IM_JAX_SPEC = importlib.util.find_spec('im_jax')
+if (_PACKAGE_DIR.parent.name == 'src' and (_CHECKOUT / 'pyproject.toml').is_file()
+        and (_IM_JAX_SPEC is None or _IM_JAX_SPEC.origin is None)
+        and (_LOCAL_IM_JAX / 'im_jax' / '__init__.py').is_file()):
     sys.path.insert(0, str(_LOCAL_IM_JAX))
 
 from .dic_run import write_status

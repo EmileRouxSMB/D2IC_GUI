@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const source = fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../src/D2IC_GUI/static/app.js'), 'utf8');
 const controls = source.slice(source.indexOf('  function controlFor('), source.indexOf('  let seriesRequestId'));
 const context = { state: {config: {project: {mode: 'dic'}}}, htmlEscape: x => String(x ?? '') };
 vm.createContext(context);

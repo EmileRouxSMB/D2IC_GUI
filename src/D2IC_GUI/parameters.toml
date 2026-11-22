@@ -1,5 +1,5 @@
 # Catalogue des paramètres du GUI ; les valeurs des études restent dans config.toml.
-# Voir CONFIG_SCHEMA.md pour ajouter un paramètre. Redémarrer le serveur après modification.
+# Voir docs/CONFIG_SCHEMA.md à la racine du dépôt pour ajouter un paramètre. Redémarrer le serveur après modification.
 catalog_version = 1
 thermal_sections = ["thermal", "registration", "synchronization"]
 

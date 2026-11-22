@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { transform } = require('../static/roi_mesh.js');
-const { _math } = require('../static/image_zoom.js');
+const { transform } = require('../src/D2IC_GUI/static/roi_mesh.js');
+const { _math } = require('../src/D2IC_GUI/static/image_zoom.js');
 
 test('native mesh edges map to the VIS contain box at every zoom', () => {
   for (const [fw, fh, iw, ih] of [[800, 600, 1920, 1200], [390, 600, 900, 1600]]) {
