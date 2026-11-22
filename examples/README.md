@@ -1,40 +1,20 @@
 # Exemple synthétique VIS + TH
 
-Après l’installation éditable décrite dans le [README](../README.md#installation-et-démarrage),
-le générateur est accessible depuis n’importe quel dossier :
+Après l’[installation](../README.md#installation) :
 
 ```bash
 python -m D2IC_GUI.examples.generate_synthetic_study /tmp/d2ic_gui_synthetic
 ```
 
-Le lanceur `examples/generate_synthetic_study.py`, à la racine du dépôt,
-reste disponible et appelle le même générateur empaqueté.
+Le lanceur `examples/generate_synthetic_study.py` appelle le même générateur. Celui-ci produit les TIFF VIS/TH et `expected.json` ; ces images servent à la validation, pas à une mesure expérimentale.
 
-Le script écrit deux séquences TIFF et `expected.json` dans le dossier donné. Il
-ne modifie aucune image existante. Il ne faut pas interpréter les images de cette
-étude comme des données expérimentales.
+| Donnée | Valeur analytique |
+| --- | --- |
+| VIS | Temps `0`, `0.15`, `0.35`, `0.45` s ; translations `(0,0)`, `(2,1)`, `(4,2)`, `(6,3)` px. |
+| TH | Résolution moitié ; champ uniforme `T(t)=20+2t` °C, cadence 10 Hz, trame à `0.3 s` manquante. |
+| Correspondance | `x_TH=x_VIS·63/127`, `y_TH=y_VIS·47/95`. |
+| Résultats attendus | À `0.15 s`, `20.3 °C` ; à `0.35 s`, température absente à cause de la trame manquante. |
 
-La séquence VIS mesure une translation rigide connue, exprimée en pixels VIS
-d'origine `(x, y)`. L'image est indexée `(y, x)`. Les quatre temps VIS sont en
-secondes et commencent par l'état de référence sans déplacement. La séquence TH
-a une résolution moitié en chaque direction, avec le même champ de vue. Chaque
-image contient une température uniforme en °C suivant `T(t) = 20 + 2 t`. Les
-numéros TH suivent une cadence nominale de 10 Hz ; la trame 3 à `0.3 s` manque.
-Ainsi, l'instant VIS `0.35 s` se trouve entre les images TH `0.2 s` et `0.4 s`,
-avec une trame numérotée manquante dans l'intervalle. L'interpolation linéaire
-attendue donne `indisponible (trame TH 3 manquante) °C`.
+Dans le GUI, choisir `VIS/vis_0000_tick0000.tif`, motif `vis_*.tif`, expression `tick(\d+)` et cadence VIS `100`. Pour TH : dossier `TH/`, expression `th_(\d+)`, cadence `10`. Importer ou dessiner la ROI, mailler, apparier et approuver les points VIS–TH, puis préparer/lancer le job. Le masque du rejeu automatisé couvre `x=28..99`, `y=22..73`.
 
-Les coordonnées couvrent le même champ de vue : `x_th = (W_th - 1)/(W_vis - 1)
-* x_vis` et de même pour `y`. Les TIFF TH sont des températures float32 déjà
-exprimées en °C ; aucune correction radiométrique n'est appliquée.
-
-## Rejouer dans le GUI
-
-Lancer `python -m D2IC_GUI`, créer une étude et renseigner dans le panneau droit :
-
-- `paths.visible_dir` : `/tmp/d2ic_gui_synthetic/VIS` ; `paths.reference_image` : `vis_0000_tick0000.tif` ; `paths.visible_pattern` : `vis_*.tif`.
-- `time.visible_frame_regex` : `tick(\d+)` ; `time.visible_fps` : `100`.
-- Dessiner ou importer un masque VIS sur la référence, enregistrer la ROI, puis prévisualiser le maillage. Pour reproduire le test automatisé, le masque est le rectangle intérieur `x=28..99`, `y=22..73`.
-- Pour le parcours couplé, choisir **DIC + thermique**, fixer `thermal.image_dir` à `/tmp/d2ic_gui_synthetic/TH`, `thermal.frame_regex` à `th_(\d+)` et `thermal.thermal_fps` à `10`. Apparier au moins trois points VIS–TH non alignés, inspecter les résidus et approuver la correspondance.
-
-Le test de rejeu compare la translation VIS et la température à `0,15 s` ; il vérifie que la trame TH manquante exclut `0,35 s` du PVD couplé. Les chemins absolus des images restent dans le manifeste du run, sans copie des séquences.
+Les étapes détaillées sont dans le [manuel](../docs/MANUEL_UTILISATION.md). `config_dic.toml` et `config_dic_thermal.toml` donnent des réglages de départ ; adapter les chemins aux images générées.

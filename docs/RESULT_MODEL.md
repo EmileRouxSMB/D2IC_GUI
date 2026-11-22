@@ -1,54 +1,49 @@
-# Modèle de résultats D2IC utilisé par le GUI
+# Modèle des résultats
 
-## Source de vérité d'un run
+Cette page est la référence unique pour le stockage, la reprise, les unités et les exports d’un run D2IC_GUI. Les contrats des APIs amont sont dans [INTEGRATION_CONTRACTS.md](INTEGRATION_CONTRACTS.md).
 
-Chaque calcul possède un dossier immuable `runs/<id>/`. Le fichier `config.toml` et le `manifest.json` y figent les choix, les versions logicielles, le SHA-256 du masque final et les chemins absolus des images VIS/TH. Les images originales restent dans leurs dossiers. Le masque final et, pour un parcours couplé, le JSON de correspondance approuvée sont les seuls petits fichiers d'entrée copiés dans le run.
+## Run et stockage
+
+Chaque run est conservé dans `runs/<id>/`. Les sources d’images restent à leur emplacement ; le run fige sa configuration, ses chemins absolus, ses versions, les temps, les conventions et l’empreinte SHA-256 du masque. Le masque final et, en mode couplé, la correspondance approuvée sont copiés.
 
 ```text
 runs/<id>/
-  config.toml                 paramètres de l'étude au lancement
-  dic_config.toml             paramètres effectivement lus par D2IC
-  manifest.json               provenance, unités, temps et exports
-  mask_final.tif              ROI binaire figée
-  status.json, run.log         état du worker et journal
+  config.toml          réglages de l’étude au lancement
+  dic_config.toml      configuration transmise à D2IC
+  manifest.json        provenance, temps, unités, exports
+  mask_final.tif       ROI figée
+  status.json, run.log état et journal
   results/
-    dic_store/
-      metadata.json           schéma D2IC, chemins, conventions et temps VIS
-      mesh.npz                nodes_xy (N,2), elements (Ne,3|4)
-      roi.npz                 roi_mask (H,W)
-      frames/frame_NNNN.npz   u_nodal (N,2), strain (N,3), résidu optionnel
-      checkpoint.npz          dernier état validé pour la reprise
-      progress.json           progression et nombre d'images validées
-    thermal_fields.npz        champs TH aux instants VIS, en mode couplé
-    *.vtu, *.pvd              exports ParaView selon la configuration
-    dic_results.npz           archive globale facultative, créée à la demande
+    dic_store/         metadata.json, mesh.npz, roi.npz
+      frames/frame_NNNN.npz   u_nodal (N,2), strain (N,3)
+      checkpoint.npz, progress.json
+    thermal_fields.npz champs thermiques du parcours couplé
+    *.vtu, *.pvd             exports configurés
+    dic_results.npz          export global facultatif
 ```
 
-Le magasin versionné `dic_store` est la source de vérité des nouveaux runs. Le GUI l'ouvre avec `d2ic.io.result_store.open_result_store`. Les anciens runs ayant seulement `dic_results.npz` restent lisibles par le même lecteur. Un nouveau run ne produit pas d'archive globale automatiquement : l'action **Créer une archive NPZ compatible** l'exporte à la demande. L'option D2IC `output.export_legacy_npz` vaut `true` par défaut pour les autres consommateurs de D2IC ; l'adaptateur GUI la fixe à `false`.
+`dic_store` est la source de vérité des nouveaux runs et s’ouvre avec `d2ic.io.result_store.open_result_store`. Les anciennes archives `dic_results.npz` restent lisibles. Le GUI ne crée un NPZ global que sur demande ; les autres consommateurs de D2IC conservent leurs propres défauts d’export.
 
 ## Dimensions, temps et unités
 
-Les images sont indexées `(y,x)`, les nœuds et déplacements sont `(x,y)` en pixels VIS natifs. `strain (N,3)` contient `[E11,E22,E12]`, avec `E12` tensoriel. Le magasin ne stocke que les images VIS déformées, dans l'ordre temporel. L'état de référence au premier temps VIS est ajouté en lecture : `u₀=0`, `E₀=0`. `metadata.json` reçoit `reference_time_s` et `frame_times_s`; le manifeste associe à chaque instant le chemin absolu d'image utilisé.
+- Images : `(y,x)` ; nœuds et déplacements : `(x,y)` en pixels VIS natifs. `strain (N,3)` suit `[E11,E22,E12]`, où `E12` est tensoriel et les déformations sont sans dimension.
+- Le magasin contient les images VIS déformées, dans l’ordre temporel. La lecture ajoute la référence au premier temps VIS : `u₀=0`, `E₀=0`. `metadata.json` conserve `reference_time_s` et `frame_times_s`; le manifeste associe les chemins d’image.
+- Une longueur en mm exige une échelle confirmée. Le magasin DIC reste en pixels ; les VTU convertis sont distincts des VTU natifs. Les déformations restent sans dimension.
 
-`thermal_fields.npz` contient `temperature`, `delta_temperature`, `thermal_valid` de forme `(Nt+1,N)` et les champs élémentaires de forme `(Nt+1,Ne)`. Une température absente est `NaN`, jamais remplacée par une autre image. Le manifeste conserve pour chaque temps VIS les deux chemins TH encadrants, leur temps, le poids d'interpolation et la cause d'invalidité. Les champs thermiques sont consultables même lorsque l'export VTU est désactivé.
+## Fusion thermique et validité
 
-Une sortie en mm exige un étalonnage confirmé. D2IC garde le magasin en pixels ; les VTU en mm sont des fichiers distincts des VTU natifs afin de pouvoir reconstruire l'export sans multiplier deux fois les coordonnées. Les déformations restent sans dimension.
+Les hypothèses et règles de fusion sont définies dans le [contrat scientifique](INTEGRATION_CONTRACTS.md#contrat-scientifique). Le fichier `thermal_fields.npz` stocke `temperature`, `delta_temperature`, `thermal_valid` de forme `(Nt+1,N)` et les moyennes élémentaires `(Nt+1,Ne)`. Une valeur absente vaut `NaN`. Le manifeste conserve, pour chaque temps VIS, les TH encadrantes, leurs temps, le poids d’interpolation et la cause d’invalidité.
 
-## Mémoire de la fusion thermique
+Le worker traite les frames une à une. Les six tableaux thermiques sont assemblés dans des NPY temporaires mappés sur disque, puis publiés dans un NPZ après réussite de la fusion, des exports demandés et de la compression. L’espace disque temporaire est proportionnel à ces tableaux ; les mappings sont fermés avant suppression des temporaires, après succès ou erreur.
 
-Le worker consulte les déplacements et déformations DIC une image à la fois. `iter_thermal_sequence` conserve la référence thermique pour calculer `ΔT`, puis fournit chaque état au worker ; `fuse_thermal_sequence` reste disponible pour les consommateurs qui demandent une liste en mémoire.
+## Écriture, reprise et exports
 
-Les six tableaux thermiques sont assemblés dans des fichiers NPY temporaires mappés sur disque, sous `results/`, puis compressés dans le même `thermal_fields.npz`. Cela nécessite de l’espace disque temporaire proportionnel aux tableaux thermiques non compressés. Les mappings sont fermés et les fichiers temporaires supprimés après succès ou erreur. La publication remplace l’archive précédente seulement après réussite de la fusion, des exports demandés et de la compression. Les formats, unités, invalidités et conventions de référence restent ceux décrits ci-dessus.
+D2IC écrit chaque frame et son checkpoint atomiquement. Seules les frames validées par checkpoint sont visibles ; `progress.json` indique l’avancement. Une reprise vérifie empreinte de configuration, images, masque et maillage avant réutilisation des résultats. Le GUI garde les runs précédents et n’autorise la reprise que pour les états échoué ou annulé. Il ne réécrit pas les chemins historiques lors d’une relocalisation d’étude.
 
-## Écriture, reprise et compatibilité
+Les PVD utilisent les temps VIS mesurés ; une collection couplée omet les instants sans acquisition TH exacte ni encadrement temporel valide. Des nœuds peuvent néanmoins rester invalides dans une frame exportée. La géométrie exportée reste celle de référence ; coordonnées et déplacements partagent l’unité choisie. VTU/PVD sont configurés par run. Le NPZ monolithique est un format de compatibilité recréable depuis le magasin, sans relancer la DIC.
 
-D2IC écrit une frame puis son checkpoint atomiquement. `progress.json` signale les images terminées ; une frame non validée par checkpoint n'est pas exposée. À la reprise, D2IC compare l'empreinte de la configuration, des images et du masque, puis vérifie le maillage avant de réutiliser un déplacement. Le GUI conserve les anciens runs et n'autorise la reprise que pour un état échoué ou annulé. La relocalisation d'une étude ne réécrit pas les chemins historiques des runs.
+## Courbes et CSV
 
-Les exports PVD sont datés aux temps VIS mesurés. Un PVD couplé omet les instants sans paire TH valide. Le format `dic_results.npz` est conservé comme export de compatibilité et peut être recréé à partir du magasin sans relancer la DIC.
+Le suivi de points exporte, pour chaque nœud sélectionné et temps validé (référence incluse) : `node,frame,time_s,<champ>_<unité>`. Une coupe est un segment matériel défini en pixels VIS de référence ; les champs nodaux sont interpolés sur les triangles de visualisation (Q4 découpé en 012 et 023). La distance A→B est mesurée dans la configuration de référence et exprimée dans l’unité du run. Hors maillage ou valeurs non finies donnent des cellules vides.
 
-
-## Courbes et exports CSV
-
-Le suivi de points exporte la grandeur choisie pour tous les nœuds sélectionnés et tous les instants validés, référence comprise (`node,frame,time_s,<champ>_<unité>`). La coupe est un segment matériel défini en pixels VIS de référence ; le clic dans la configuration courante est inversé par interpolation affine des triangles de visualisation. Les champs nodaux sont interpolés sur ce segment, les quadrilatères étant découpés en triangles 012 et 023 comme les cartes. La distance A → B est mesurée dans la configuration de référence et convertie dans l’unité de longueur du run. Les sorties hors maillage ou non finies restent absentes et produisent des cellules CSV vides.
-
-La coupe exporte soit l’image VIS choisie, soit tous les instants validés (`frame,time_s,distance_<unité>,x_ref_px,y_ref_px,<champ>_<unité>`). Les déformations portent l’unité `1`, les températures celle du run. Ces analyses ne couvrent pas les résidus ni la température élémentaire. Le centrage des couleurs sur zéro est une option de visualisation : bornes ±max(|min|, |max|), en partant des bornes explicites si présentes ou du champ courant autrement.
+La coupe exporte une image ou tous les temps : `frame,time_s,distance_<unité>,x_ref_px,y_ref_px,<champ>_<unité>`. Déformations : unité `1` ; température : unité déclarée. Résidus et températures élémentaires ne sont pas inclus. Le centrage couleur autour de zéro est une option d’affichage, calculée depuis les bornes explicites ou le champ courant.
