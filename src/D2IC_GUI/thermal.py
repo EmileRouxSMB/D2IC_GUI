@@ -202,26 +202,49 @@ def element_mean_temperature(nodes_xy, displacement_xy, elements, matrix,
 def fuse_thermal_sequence(visible_times, thermal_times, thermal_frames,
                           thermal_images, nodes_xy, displacements_xy, elements,
                           matrix, *, thermal_fps=None, period_tolerance=0.05):
-    """Fuse complete VIS states and return node/cell T, delta T and provenance.
+    """Return all fused states for an in-memory displacement history.
 
-    Displacements are (Nt,N,2) and include the reference state at first VIS
-    time. Its displacement is forced to zero. No delta T exists where T_ref
-    at the same material point or reference element is absent.
+    This compatibility entry point accepts (Nt,N,2), including the reference.
+    Workers with a frame reader use iter_thermal_sequence instead, avoiding
+    accumulation of the displacement history and the list of thermal states.
+    """
+    vis = _strict_times(visible_times, "visible_times")
+    nodes = np.asarray(nodes_xy, dtype=float)
+    u = np.asarray(displacements_xy, dtype=float)
+    if u.shape != (len(vis), len(nodes), 2):
+        raise ValueError("displacements must have shape (Nt, N, 2)")
+    return list(iter_thermal_sequence(
+        vis, thermal_times, thermal_frames, thermal_images, nodes, u,
+        elements, matrix, thermal_fps=thermal_fps,
+        period_tolerance=period_tolerance))
+
+
+def iter_thermal_sequence(visible_times, thermal_times, thermal_frames,
+                          thermal_images, nodes_xy, displacements_xy, elements,
+                          matrix, *, thermal_fps=None, period_tolerance=0.05):
+    """Yield node/cell temperatures and provenance in VIS time order.
+
+    displacements_xy is an indexable sequence of (N,2) native-pixel fields,
+    including reference index zero. Only the current displacement is read;
+    reference displacement is forced to zero. T_ref and its element means
+    remain alive for delta T, without retaining earlier deformed states.
+    The caller must consume each yielded state before requesting the next.
     """
     vis = _strict_times(visible_times, "visible_times")
     brackets = thermal_brackets(vis, thermal_times, thermal_frames,
                                 thermal_fps=thermal_fps,
                                 period_tolerance=period_tolerance)
     nodes = np.asarray(nodes_xy, dtype=float)
-    u = np.asarray(displacements_xy, dtype=float)
-    if u.shape != (len(vis), len(nodes), 2):
+    if len(displacements_xy) != len(vis):
         raise ValueError("displacements must have shape (Nt, N, 2)")
     if len(thermal_images) != len(thermal_times):
         raise ValueError("one thermal image is required per thermal time")
-    results = []
     reference_nodes = reference_cells = None
     for k, t in enumerate(vis):
-        displacement = np.zeros_like(nodes) if k == 0 else u[k]
+        displacement = (np.zeros_like(nodes) if k == 0
+                        else np.asarray(displacements_xy[k], dtype=float))
+        if displacement.shape != nodes.shape:
+            raise ValueError("each displacement must have shape (N, 2)")
         left, right = int(brackets["left"][k]), int(brackets["right"][k])
         alpha = float(brackets["alpha"][k])
         temperature, node_valid = fuse_thermal_frame(
@@ -234,14 +257,15 @@ def fuse_thermal_sequence(visible_times, thermal_times, thermal_frames,
                          temperature - reference_nodes, np.nan)
         delta_mean = np.where(cell_valid & np.isfinite(reference_cells),
                               mean - reference_cells, np.nan)
-        results.append({"time_s": float(t), "left": left, "right": right,
-                        "alpha": alpha, "time_valid": bool(brackets["valid"][k]),
-                        "reason": str(brackets["reason"][k]),
-                        "temperature": temperature, "delta_temperature": delta,
-                        "thermal_valid": node_valid, "temperature_element": mean,
-                        "delta_temperature_element": delta_mean,
-                        "thermal_valid_element": cell_valid})
-    return results
+        yield {
+            "time_s": float(t), "left": left, "right": right,
+            "alpha": alpha, "time_valid": bool(brackets["valid"][k]),
+            "reason": str(brackets["reason"][k]),
+            "temperature": temperature, "delta_temperature": delta,
+            "thermal_valid": node_valid, "temperature_element": mean,
+            "delta_temperature_element": delta_mean,
+            "thermal_valid_element": cell_valid,
+        }
 
 
 def write_thermal_vtu(path, nodes_xy, elements, displacement_xy, thermal_state,

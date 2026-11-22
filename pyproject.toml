@@ -13,10 +13,15 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["D2IC_GUI"]
+package-dir = {"" = "src"}
 
-[tool.setuptools.package-dir]
-D2IC_GUI = "."
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["D2IC_GUI*"]
 
 [tool.setuptools.package-data]
-D2IC_GUI = ["static/*.html", "static/*.css", "static/*.js"]
+D2IC_GUI = ["parameters.toml", "static/*.html", "static/*.css", "static/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

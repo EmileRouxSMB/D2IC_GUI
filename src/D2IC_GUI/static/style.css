@@ -201,8 +201,6 @@
 /* ROI and mesh share the same VIS pixel coordinates and fit the whole frame. */
 .roi-work{overflow:hidden}
 .roi-work .roi-canvas-wrap{flex:1 1 0;min-height:0;overflow:hidden}
-.roi-image-stack{position:relative;width:100%;height:100%;min-width:0;min-height:0}
-.roi-image-stack img{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;object-fit:contain}
 .roi-image-stack img[hidden]{display:none}
 .roi-layer-toggle{white-space:nowrap;cursor:pointer;user-select:none}
 .roi-layer-toggle input{accent-color:#28765c;margin:0}
@@ -335,7 +333,9 @@
 .d2ic-image-zoom-toolbar button:focus-visible{outline:2px solid #287d54;outline-offset:1px}
 .d2ic-image-zoom-level{color:#64786a;font-variant-numeric:tabular-nums}
 .d2ic-image-zoom-selection{box-sizing:border-box}
-.image-zoom-mode,.image-zoom-mode canvas{cursor:zoom-in!important;touch-action:none}
+.image-zoom-mode,.image-zoom-mode :is(img,canvas,svg){cursor:zoom-in!important;touch-action:none}
+.image-zoom-out,.image-zoom-out :is(img,canvas,svg){cursor:zoom-out!important}
+.d2ic-image-zoom-toolbar{cursor:default}
 
 /* Preserve source pixels when magnifying images and the complete ROI stack.
    crisp-edges uses nearest-neighbour scaling where supported; pixelated is
@@ -350,3 +350,104 @@
 #roi-shape-canvas{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none;touch-action:none;cursor:crosshair}
 .sync-view .data-table-wrap{flex:1 1 44%;min-height:90px;max-height:none;margin-top:0}
 @media(max-width:760px){.sync-previews{gap:3px}.sync-preview{padding:3px}.sync-preview-label{display:block;font-size:9px}.sync-preview-label span{display:block}.sync-preview small{font-size:9px}}
+
+/* Preparation states remain visible when the navigation is collapsed. */
+.nav-item { --step-color: #7b8188; }
+.nav-item[data-readiness="inactive"] { --step-color: #7b8188; }
+.nav-item[data-readiness="warning"] { --step-color: #c4a000; }
+.nav-item[data-readiness="blocked"] { --step-color: #c12f35; }
+.nav-item[data-readiness="complete"] { --step-color: #20804e; }
+.run-row{flex-wrap:wrap}.run-preparation{flex:1 0 100%;margin:0;padding:2px 8px 6px 25px;font-size:11px;line-height:1.45;list-style:none}.run-preparation-error{color:#b4232b}.run-preparation-warning{color:#8b6b00}
+.nav-item .nav-icon, .nav-item .nav-state { color: var(--step-color); }
+.nav-item .nav-icon { border-bottom: 3px solid var(--step-color); padding-bottom: 3px; }
+.readiness-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#readiness-summary { margin: 0; padding: 8px 14px; font-size: 12px; }
+#readiness-dialog { width: min(640px, calc(100vw - 32px)); max-height: 85dvh; overflow-y: auto; }
+#readiness-dialog h3 { font-size: 14px; margin-top: 22px; }
+#readiness-details ul { padding-left: 20px; }
+#readiness-details li { margin: 9px 0; }
+.readiness-link { background: none; border: none; color: #344c65; padding: 2px; text-align: left; text-decoration: underline; cursor: pointer; font: inherit; font-size: 13px; }
+#readiness-dialog .button { white-space: normal; }
+
+/* ROI contours remain SVG images; the native mesh overlay uses screen-pixel strokes. */
+.roi-image-stack img[src^="/api/roi/vector-layer"],
+.roi-image-stack img[src^="/api/mesh/vector-layer"],
+.roi-image-stack img[src^="data:image/svg+xml"] { image-rendering: auto; }
+
+/* Fit all image pixels inside an explicitly bounded viewport, clear of controls. */
+.sequence-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 26%);
+  grid-template-rows: minmax(0, 1fr);
+}
+/* One viewport contract for VIS, ROI, scale, DIC settings and result images. */
+.scientific-image-frame { --image-toolbar-height: 42px; min-width: 0; min-height: 0; overflow: hidden; }
+.scientific-image-frame > .scientific-image-content,
+.scientific-image-frame > img.scientific-image-content {
+  position: absolute; inset: var(--image-toolbar-height) 0 0;
+  width: 100%; height: calc(100% - var(--image-toolbar-height));
+  min-width: 0; min-height: 0; max-width: none; max-height: none;
+  object-fit: contain; object-position: center;
+}
+.scientific-image-content > img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  max-width: none; max-height: none; object-fit: contain; object-position: center;
+}
+.sequence-info { position: static; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.sequence-info .data-table-wrap { flex: 1 1 auto; min-height: 0; max-height: none; }
+.roi-work { inset: 0; padding: 6px; gap: 5px; }
+.roi-work > .roi-toolbar, .roi-work > .roi-draw-toolbar, .roi-work > .inline-status { flex: 0 0 auto; }
+.roi-work > .inline-status { padding: 5px 8px; }
+.roi-work .roi-canvas-wrap {
+  position: relative; flex: 1 1 0; min-width: 0; min-height: 0;
+  display: block; overflow: hidden;
+}
+@container (max-width:740px) {
+  .sequence-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(140px, 27%); }
+}
+@media(max-width:760px) {
+  .sequence-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(130px, 27%); }
+  .roi-work { padding: 3px; gap: 3px; }
+}
+
+.dic-view { grid-template-rows: minmax(0, 1fr); }
+@container (max-width:740px) { .dic-view { grid-template-rows: minmax(0, 1fr) auto; } }
+@media(max-width:760px) { .dic-view { grid-template-rows: minmax(0, 1fr) auto; } }
+
+/* Result source and field share the same image viewport and zoom transform. */
+.scientific-image-content > img[hidden] { display: none; }
+.result-toolbar input[type="range"] { width: 105px; accent-color: #2b765d; }
+.result-toolbar output { min-width: 35px; font-variant-numeric: tabular-nums; }
+.result-image-stack > #run-background-image { z-index: 0; }
+.result-image-stack > #run-field-image { z-index: 1; image-rendering: auto; }
+.result-view .run-field-info { white-space: normal; overflow: visible; line-height: 1.4; }
+#run-background-status, #run-field-render-status { color: #a33d32; }
+
+/* Result analyses share a panel; field geometry stays in the common image view. */
+.analysis-tabs{display:flex;gap:4px;margin-bottom:8px;flex:0 0 auto}
+.analysis-tabs button{flex:1;border:1px solid #dfe5dd;border-radius:5px;padding:7px;background:#fff;color:#526456;font-size:11px;cursor:pointer}
+.analysis-tabs button[aria-selected="true"]{background:#e4f0e8;border-color:#428368;color:#215e42}
+#history-content,#section-content{display:flex;flex-direction:column;gap:7px;flex:1;min-height:0;overflow:auto}
+#history-content[hidden],#section-content[hidden]{display:none}
+#section-samples{width:65px}
+#section-coordinates{font-size:10px;color:#536959}
+.color-controls #color-zero{width:auto;height:auto}
+.frame-slider{flex-wrap:wrap}
+.result-toolbar .frame-slider input{width:150px}
+.result-toolbar .frame-slider output{min-width:105px}
+
+/* Keep the live run status readable beside the result navigation. */
+.result-view-head > div { min-width: 0; }
+#result-run-progress { display: block; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .result-view-head { padding-top: 32px; flex-wrap: wrap; }
+}
+
+#history-content .run-history,#section-content .run-history{flex:1 0 140px;min-height:140px}
+
+/* Outside the transformed image stack: geometry is mapped into the viewport. */
+.roi-mesh-overlay { clip-path:inset(var(--image-toolbar-height, 42px) 0 0); position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:hidden; }
+.roi-mesh-overlay[hidden] { display:none; }
+
+@media (max-width: 760px) {
+  .job-view .results-head { padding-top: 32px; }
+}

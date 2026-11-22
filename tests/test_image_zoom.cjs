@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { attach, _math, geometry } = require('../static/image_zoom.js');
+const { attach, _math, geometry } = require('../src/D2IC_GUI/static/image_zoom.js');
 
 test('rectangle zoom fits selection and preserves aspect ratio', () => {
   const state = { zoom: 1, tx: 0, ty: 0 };
@@ -50,9 +50,9 @@ test('resize preserves the same center point in image coordinates when aspect ra
   assert.ok(Math.abs(imageCenterY - 0.35) < 1e-12);
 });
 
-test('drag and Ctrl-click consume the following click so image tools do not fire', () => {
+test('zoom cursor follows Ctrl/Cmd, and drag/Ctrl-click consume image-tool clicks', () => {
   class Element {
-    constructor(doc) { this.ownerDocument = doc; this.style = {}; this.listeners = {}; this.children = []; this.clientWidth = 400; this.clientHeight = 200; this.clientLeft = this.clientTop = 0; this.classList = { toggle() {}, remove() {} }; }
+    constructor(doc) { this.ownerDocument = doc; this.style = {}; this.listeners = {}; this.children = []; this.clientWidth = 400; this.clientHeight = 200; this.clientLeft = this.clientTop = 0; this.classes = new Set(); this.classList = { toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name), remove: (...names) => names.forEach(name => this.classes.delete(name)) }; }
     appendChild(child) { this.children.push(child); child.parent = this; }
     append(...children) { children.forEach(child => this.appendChild(child)); }
     remove() { this.parent.children = this.parent.children.filter(item => item !== this); }
@@ -66,11 +66,35 @@ test('drag and Ctrl-click consume the following click so image tools do not fire
     dispatch(name, event) { for (const { fn } of this.listeners[name] || []) fn(event); }
     dispatchEvent() { return true; }
   }
-  const doc = { createElement() { return new Element(doc); }, defaultView: { Event: class { constructor(type) { this.type = type; } }, getComputedStyle() { return { position: 'absolute' }; } } };
+  const doc = { addEventListener() {}, removeEventListener() {}, createElement() { return new Element(doc); }, defaultView: { addEventListener() {}, removeEventListener() {}, Event: class { constructor(type) { this.type = type; } }, getComputedStyle() { return { position: 'absolute' }; } } };
+  for (const target of [doc, doc.defaultView]) {
+    target.listeners = {};
+    target.addEventListener = Element.prototype.addEventListener;
+    target.removeEventListener = Element.prototype.removeEventListener;
+    target.dispatch = Element.prototype.dispatch;
+  }
   const frame = new Element(doc); frame.ownerDocument = doc;
   let consumed = 0;
   const event = (x, y, extra = {}) => ({ clientX: x, clientY: y, button: 0, pointerId: 1, target: frame, preventDefault() {}, stopImmediatePropagation() { consumed++; }, ...extra });
   const controller = attach(frame);
+  const isZoomOut = () => frame.classes.has('image-zoom-out');
+  assert.equal(isZoomOut(), false);
+  doc.dispatch('keydown', { ctrlKey: true });
+  assert.equal(isZoomOut(), true); // no pointer movement required
+  doc.dispatch('keyup', { ctrlKey: false });
+  assert.equal(isZoomOut(), false);
+  doc.dispatch('keydown', { metaKey: true });
+  assert.equal(isZoomOut(), true);
+  doc.dispatch('keyup', { ctrlKey: true, metaKey: false });
+  assert.equal(isZoomOut(), true); // Ctrl still held after Cmd release
+  doc.defaultView.dispatch('blur', {});
+  assert.equal(isZoomOut(), false);
+  controller.setInteractive(false);
+  frame.dispatch('pointerenter', { ctrlKey: true });
+  assert.equal(isZoomOut(), true); // catches a modifier held on window entry
+  frame.dispatch('pointermove', { ctrlKey: false });
+  assert.equal(isZoomOut(), false);
+  controller.setInteractive(true);
   frame.dispatch('pointerdown', event(50, 50));
   frame.dispatch('pointerup', event(50, 50));
   assert.equal(frame.__d2icZoomState.zoom, 2); // tap zooms ×2 at the pointer
@@ -84,7 +108,13 @@ test('drag and Ctrl-click consume the following click so image tools do not fire
   frame.dispatch('click', event(100, 100));
   assert.equal(consumed, 8);
   assert.equal(frame.__d2icZoomState.zoom, 2.5);
+  assert.equal(isZoomOut(), true);
   controller.destroy();
+  assert.equal(isZoomOut(), false);
+  assert.equal(doc.listeners.keydown.length, 0);
+  assert.equal(doc.listeners.keyup.length, 0);
+  assert.equal(doc.defaultView.listeners.blur.length, 0);
+  assert.equal(frame.listeners.pointerenter.length, 0);
 });
 
 test('late image load refreshes dynamic transform origin; normal and toolbar clicks pass through', () => {
@@ -103,7 +133,7 @@ test('late image load refreshes dynamic transform origin; normal and toolbar cli
     dispatch(name, event) { for (const fn of this.listeners[name] || []) fn(event); }
     dispatchEvent() { return true; }
   }
-  const doc = { createElement() { return new Element(doc); }, defaultView: { Event: class { constructor(type) { this.type = type; } }, getComputedStyle() { return { position: 'relative' }; } } };
+  const doc = { addEventListener() {}, removeEventListener() {}, createElement() { return new Element(doc); }, defaultView: { addEventListener() {}, removeEventListener() {}, Event: class { constructor(type) { this.type = type; } }, getComputedStyle() { return { position: 'relative' }; } } };
   const frame = new Element(doc);
   const image = new Element(doc); image.naturalWidth = 0; image.naturalHeight = 0;
   let consumed = 0;
@@ -133,4 +163,18 @@ test('geometry returns the transformed contain box relative to the frame client 
   };
   const box = geometry(frame, image);
   assert.deepEqual(box, { left: -100, top: -40, width: 800, height: 400, right: 700, bottom: 360, zoom: 2 });
+});
+
+test('resize preserves the source point at the viewport center below the shared toolbar', () => {
+  const state = {zoom: 2, tx: -100, ty: -40};
+  const top = 42;
+  const oldBox = _math.containBox(400, 242 - top, 400, 200);
+  const expectedX = ((400 / 2 - state.tx) / state.zoom - oldBox.left) / oldBox.width;
+  const expectedY = (((242 + top) / 2 - state.ty) / state.zoom - top - oldBox.top) / oldBox.height;
+  _math.preserveCenterOnResize(state, 400, 242, 200, 442, 400, 200, top);
+  const nextBox = _math.containBox(200, 442 - top, 400, 200);
+  const actualX = ((200 / 2 - state.tx) / state.zoom - nextBox.left) / nextBox.width;
+  const actualY = (((442 + top) / 2 - state.ty) / state.zoom - top - nextBox.top) / nextBox.height;
+  assert.ok(Math.abs(actualX - expectedX) < 1e-12);
+  assert.ok(Math.abs(actualY - expectedY) < 1e-12);
 });

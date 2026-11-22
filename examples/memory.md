@@ -1,31 +1,5 @@
-# Memory — D2IC_GUI/examples
+# Repères des exemples
 
-## Rôle du dossier
+Les configurations de ce dossier sont des points de départ à adapter. Le script local est un lanceur ; l’implémentation importable est `src/D2IC_GUI/examples/generate_synthetic_study.py` à la racine du dépôt.
 
-Contient des exemples compacts et reproductibles pour vérifier les contrats
-scientifiques de l'interface.
-
-## Fichiers importants
-
-- `generate_synthetic_study.py` : écrit une translation VIS connue et une séquence TH uniforme à évolution linéaire, avec résolutions et temps distincts.
-- `README.md` : commande de génération et valeurs analytiques attendues.
-
-## Concepts physiques ou numériques
-
-La translation est définie en pixels VIS d'origine `(x, y)`. La température TH
-est `20 + 2 t` °C et constante dans l'espace. Le champ de vue commun est mis à
-l'échelle des centres de pixels pour la résolution TH inférieure.
-
-## Conventions
-
-Les configurations DIC seule et couplée documentent `dic.roi_erosion_px = 0.0` ; une valeur `3.0` exclut une bande photométrique en pixels VIS d’origine sans modifier le maillage.
-
-Images indexées `(y, x)`, coordonnées en `(x, y)`, translations en pixels VIS,
-temps en secondes, température en °C. La trame TH d'index 3, soit `0.3 s` à
-10 Hz, est intentionnellement absente.
-
-## Points d’attention
-
-Installer NumPy et tifffile pour exécuter le générateur. Les TIFF thermiques
-contiennent des valeurs float32 directement en °C. La génération n'écrit que
-dans le dossier de sortie demandé.
+Les grandeurs analytiques et la commande du générateur sont dans le [README des exemples](README.md). `expected.json`, écrit avec les images, conserve les valeurs attendues du jeu généré. Les tests `test_synthetic_study.py` et `test_integration_studies.py` vérifient les images puis les deux parcours ; aucun exemple ne devient une dépendance aux données expérimentales.

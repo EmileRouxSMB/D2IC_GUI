@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a CPU-only portable GUI on the target OS, using a bundled CPython.
 
-Run from the checkout: python D2IC_GUI/build_portable.py --help.
+Run from the checkout: python -m D2IC_GUI.build_portable --help.
 Only the build machine requires Python >=3.12, uv and Internet access.
 The resulting directory/archive runs offline without installed Python.
 """
@@ -25,7 +25,8 @@ import tempfile
 import tomllib
 
 
-ROOT = Path(__file__).resolve().parents[1]
+# This builder consumes sibling repositories from the source workspace.
+ROOT = Path(__file__).resolve().parents[3]
 PACKAGES = ("D2IC", "DICTHFusion", "im_jax", "D2IC_GUI")
 IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".git", "*.egg-info")
 
@@ -85,7 +86,7 @@ with tempfile.TemporaryDirectory() as tmp:
     app = create_app(tmp)
     assert app.title
 static = Path(__import__('D2IC_GUI').__file__).parent / 'static'
-assert all((static / p).is_file() for p in ('index.html', 'app.js', 'image_zoom.js', 'roi_shapes.js', 'style.css'))
+assert all((static / p).is_file() for p in ('index.html', 'app.js', 'image_zoom.js', 'roi_shapes.js', 'roi_mesh.js', 'result_analysis.js', 'style.css'))
 print('Smoke CPU/headless/JIT/Gmsh/worker cubique/actifs : OK')
 '''
 
@@ -115,7 +116,7 @@ def stage_sources(root, target):
         elif name == 'im_jax':
             shutil.copytree(source / 'im_jax', dest / 'im_jax', ignore=IGNORE)
         elif name == 'D2IC_GUI':
-            shutil.copytree(source / 'static', dest / 'static', ignore=IGNORE)
+            shutil.copytree(source / 'src', dest / 'src', ignore=IGNORE)
         config = dest / 'pyproject.toml'
         text = config.read_text(encoding='utf-8')
         text = re.sub(r'(?<![\w-])opencv-python(?=["<>=!~\[])',

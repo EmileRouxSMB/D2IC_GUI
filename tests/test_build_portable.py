@@ -17,11 +17,16 @@ def test_staging_replaces_opencv_only_in_copies_and_includes_assets(tmp_path):
         metadata = tomllib.loads((staged / 'pyproject.toml').read_text())
         dependencies = {re.split(r'[<>=!~;\[]', req)[0] for req in metadata['project']['dependencies']}
         assert 'opencv-python' not in dependencies
-        if name != 'im_jax':
+        if name in {'DICTHFusion', 'D2IC_GUI'}:
             assert 'opencv-python-headless' in dependencies
+        else:
+            assert 'opencv-python-headless' not in dependencies
         assert len(hashes[name]) == 64
         assert not list(staged.rglob('__pycache__'))
-    static = tmp_path / 'sources/D2IC_GUI/static'
+    package = tmp_path / 'sources/D2IC_GUI/src/D2IC_GUI'
+    assert (package / 'parameters.toml').is_file()
+    assert (package / 'examples/generate_synthetic_study.py').is_file()
+    static = package / 'static'
     assert all((static / name).is_file() for name in ('app.js', 'image_zoom.js', 'index.html'))
 
 

@@ -1,34 +1,21 @@
-# Memory — D2IC_GUI/tests
+# Vérifications du GUI
 
-## Rôle du dossier
+Depuis la racine du workspace, après installation des dépendances :
 
-Vérifier les contrats scientifiques et les interactions du GUI local.
+```bash
+PYTHONPATH=D2IC_GUI/src:D2IC/src:im_jax JAX_PLATFORMS=cpu python -m pytest -q D2IC_GUI/tests
+node --test D2IC_GUI/tests/*.cjs
+```
 
-## Fichiers importants
+Exécuter les tests seulement sur demande, selon les instructions du workspace.
 
-- `test_build_windows.py` : rejette les wheels Linux, binaires non x64 et plugins GPU ; vérifie le placement des DLL Microsoft CRT et le lanceur Windows écrit depuis Linux.
+| Groupe | Contrats couverts |
+| --- | --- |
+| `test_project_server`, `test_readiness`, `test_parameter_catalog` | Configuration, API, préparation, snapshots et imports du worker. |
+| `test_roi_shapes`, `test_result_overlay`, `test_result_sections` | ROI native, binning, calques, champs disponibles, unités et coupes. |
+| `test_thermal`, `test_thermal_streaming` | Interpolation, quadrature, référence, lecture progressive et nettoyage après erreur. |
+| `test_synthetic_study`, `test_integration_studies` | Générateur analytique et rejeu des parcours DIC/couplé. |
+| `test_desktop`, `test_build_portable`, `test_build_windows` | Lanceurs et packaging ; le contrôle statique Windows ne prouve pas son exécution. |
+| Tests `.cjs` | Géométrie, interactions et actualisation dans un environnement Node/DOM simulé. |
 
-- `test_build_portable.py` : sources de construction sans modification des originaux, dépendances headless, actifs inclus, nettoyage conservant licences et métadonnées.
-- `test_desktop.py` : forçage CPU avant imports, socket loopback, ouverture du navigateur après disponibilité HTTP et suivi/arrêt des workers multiplateforme.
-
-- `test_project_server.py` : configurations, API, ROI, maillage, snapshots et worker DIC.
-- `test_thermal.py` : correspondance temporelle et échantillonnage thermique.
-- `test_synthetic_study.py` : génération des séquences analytiques.
-- `test_integration_studies.py` : parcours des études DIC et couplées.
-- `test_image_zoom.cjs` : géométrie du zoom, transformations et interception des gestes, avec Node sans dépendance npm.
-
-## Concepts physiques ou numériques
-
-Les déplacements et coordonnées sont en pixels VIS d’origine ; la température est transportée aux mêmes points matériels. Le zoom ne change que la vue et conserve les coordonnées natives.
-
-## Conventions
-
-Depuis la racine : `PYTHONPATH=D2IC/src:im_jax:. python -m pytest -q D2IC_GUI/tests`.
-Pour le zoom : `node --test D2IC_GUI/tests/test_image_zoom.cjs`.
-
-## Points d’attention
-
-Les tests Python utilisent des images synthétiques et des dossiers temporaires. Les tests Node utilisent un DOM simulé pour les gestes et la géométrie ; ils ne remplacent pas une inspection visuelle en navigateur.
-
-
-`test_roi_shapes.py` vérifie la rastérisation native rectangle/ellipse, les trous, la photométrie avec binning, les fichiers TIFF sans écrasement et la conservation des masques presque pleins au rechargement. `test_roi_shapes.cjs` vérifie la conversion écran vers pixels natifs après zoom et les glissements inversés.
+Les fixtures écrivent dans des dossiers temporaires. Les tests Node ne remplacent pas une revue visuelle ; les performances sur longues séquences et les systèmes cibles demandent des vérifications dédiées. L’état connu est résumé dans la [feuille de route](../docs/ROADMAP_DEV.md).

@@ -1,0 +1,534 @@
+# Catalogue des paramètres du GUI ; les valeurs des études restent dans config.toml.
+# Voir docs/CONFIG_SCHEMA.md à la racine du dépôt pour ajouter un paramètre. Redémarrer le serveur après modification.
+catalog_version = 1
+thermal_sections = ["thermal", "registration", "synchronization"]
+
+[[parameters]]
+key = "project.version"
+label = "Version du schéma"
+type = "integer"
+default = 1
+view = "Global"
+help = "Version du format de l'étude ; fixée à 1."
+hidden = true
+
+[[parameters]]
+key = "project.mode"
+label = "Parcours"
+type = "string"
+default = "dic"
+view = "Global"
+help = "DIC seule ou DIC avec température."
+choices = ["dic", "dic_thermal"]
+hidden = true
+
+[[parameters]]
+key = "project.name"
+label = "Nom"
+type = "string"
+default = "Nouvelle étude"
+view = "Job Manager"
+help = "Nom lisible de l'étude."
+
+[[parameters]]
+key = "paths.visible_dir"
+label = "Dossier vers les images"
+type = "directory"
+default = ""
+view = "VIS"
+help = "Dossier des images VIS TIFF, BMP, PNG ou JPEG ; elles restent sur place."
+picker = "directory"
+order = -2
+
+[[parameters]]
+key = "paths.reference_image"
+label = "Image de référence"
+type = "file"
+default = ""
+view = "VIS"
+help = "Nom ou chemin de l'image de référence. Image 0 pour la DIC"
+picker = "image"
+
+[[parameters]]
+key = "paths.visible_pattern"
+label = "Filtre extension des images"
+type = "string"
+default = "*.tif"
+view = "VIS"
+help = "Motif de la série VIS ; la référence est exclue du calcul DIC."
+order = -1
+
+[[parameters]]
+key = "paths.excluded_images"
+label = "Images VIS désactivées"
+type = "array"
+default = []
+view = "VIS"
+help = "Noms des images exclues de l’analyse ; sélection modifiable dans la table VIS."
+hidden = true
+
+[[parameters]]
+key = "paths.output_dir"
+label = "Dossier des runs"
+type = "directory"
+default = "runs"
+view = "Job Manager"
+help = "Destination des calculs figés."
+picker = "directory"
+
+[[parameters]]
+key = "roi.initial_mask"
+label = "Fichier ROI"
+type = "file"
+default = "roi/mask_initial.tif"
+view = "ROI"
+help = "Masque TIFF ou PNG dans les pixels de la VIS de référence ; le canal alpha est ignoré."
+picker = "mask"
+
+[[parameters]]
+key = "roi.final_mask"
+label = "Masque final"
+type = "string"
+default = "roi/mask_final.tif"
+view = "ROI"
+help = "Masque binaire effectivement utilisé pour le maillage."
+hidden = true
+
+[[parameters]]
+key = "roi.operation"
+label = "Morphologie"
+type = "string"
+default = "none"
+view = "ROI"
+help = "Dilate ou érode le masque initial avant maillage."
+choices = ["none", "dilation", "erosion"]
+hidden = true
+
+[[parameters]]
+key = "roi.radius_px"
+label = "Rayon"
+type = "integer"
+default = 0
+view = "ROI"
+help = "Rayon du disque morphologique ; zéro conserve le masque."
+unit = "px VIS"
+minimum = 0
+hidden = true
+
+[[parameters]]
+key = "roi.kernel"
+label = "Noyau"
+type = "string"
+default = "disk"
+view = "ROI"
+help = "Forme de l'élément structurant ; disque discret."
+choices = ["disk"]
+hidden = true
+
+[[parameters]]
+key = "mesh.element_size_px"
+label = "Taille de maille"
+type = "float"
+default = 15.0
+view = "ROI"
+help = "Taille cible des éléments du maillage superposé à la VIS."
+unit = "px VIS"
+minimum = 0
+
+[[parameters]]
+key = "mesh.remove_islands"
+label = "Retirer les îlots"
+type = "boolean"
+default = true
+view = "ROI"
+help = "Écarte les petites composantes séparées du masque."
+hidden = true
+
+[[parameters]]
+key = "mesh.min_island_area_px"
+label = "Aire minimale d'îlot"
+type = "integer"
+default = 64
+view = "ROI"
+help = "Aire sous laquelle une composante est écartée."
+unit = "px² VIS"
+minimum = 0
+hidden = true
+
+[[parameters]]
+key = "dic.image_stride"
+label = "Pas des images"
+type = "integer"
+default = 1
+view = "Réglages DIC"
+help = "Retient une image VIS sur ce nombre ; les temps restent ceux des acquisitions retenues."
+group = "Solveur DIC"
+minimum = 1
+
+[[parameters]]
+key = "dic.image_binning"
+label = "Binning"
+type = "integer"
+default = 1
+view = "Réglages DIC"
+help = "Réduit la résolution du calcul ; les résultats reviennent aux pixels VIS d'origine."
+group = "Solveur DIC"
+minimum = 1
+
+[[parameters]]
+key = "dic.roi_erosion_px"
+label = "Érosion photométrique"
+type = "float"
+default = 0.0
+view = "ROI"
+help = "Rayon d’érosion euclidienne des pixels retenus dans le critère photométrique, autour des bords et des trous. En pixels VIS d’origine, même avec binning. Zéro désactive l’érosion. Le masque de maillage, les nœuds et les éléments restent inchangés."
+unit = "px VIS d’origine"
+minimum = 0
+
+[[parameters]]
+key = "dic.max_iters"
+label = "Itérations maximales"
+type = "integer"
+default = 400
+view = "Réglages DIC"
+help = "Limite des itérations du solveur DIC."
+group = "Solveur DIC"
+minimum = 1
+
+[[parameters]]
+key = "dic.tol"
+label = "Tolérance"
+type = "float"
+default = 0.01
+view = "Réglages DIC"
+help = "Critère d'arrêt du solveur DIC."
+group = "Solveur DIC"
+minimum = 0
+
+[[parameters]]
+key = "dic.reg_strength"
+label = "Régularisation"
+type = "float"
+default = 0.01
+view = "Réglages DIC"
+help = "Poids de la régularisation ; dépend du cas étudié."
+group = "Solveur DIC"
+minimum = 0
+
+[[parameters]]
+key = "dic.regularization"
+label = "Modèle de régularisation"
+type = "string"
+default = "elastic"
+view = "Réglages DIC"
+help = "Type de régularisation du champ de déplacement."
+group = "Solveur DIC"
+choices = ["elastic", "spring"]
+
+[[parameters]]
+key = "dic.strain_gauge_length"
+label = "Longueur de jauge"
+type = "float"
+default = 80.0
+view = "Réglages DIC"
+help = "Échelle spatiale d'estimation des déformations."
+group = "Solveur DIC"
+unit = "px VIS"
+minimum = 0
+
+[[parameters]]
+key = "dic.interpolation"
+label = "Interpolation VIS"
+type = "string"
+default = "cubic"
+view = "Réglages DIC"
+help = "Interpolation des niveaux de gris aux positions déformées."
+group = "Solveur DIC"
+choices = ["cubic", "linear"]
+
+[[parameters]]
+key = "scale.mm_per_pixel"
+label = "Facteur d'échelle"
+type = "float"
+default = 1.0
+view = "Échelle"
+help = "Millimètres par pixel VIS d'origine ; confirmé explicitement avant sortie en mm."
+unit = "mm/px"
+minimum = 0
+
+[[parameters]]
+key = "scale.method"
+label = "Méthode d'échelle"
+type = "string"
+default = "manual"
+view = "Échelle"
+help = "Saisie directe ou segment mesuré sur la référence VIS."
+choices = ["manual", "segment"]
+
+[[parameters]]
+key = "scale.confirmed"
+label = "Échelle confirmée"
+type = "boolean"
+default = false
+view = "Échelle"
+help = "Confirme que la mesure d'échelle a été vérifiée."
+
+[[parameters]]
+key = "scale.segment_xy_px"
+label = "Extrémités du segment"
+type = "array"
+default = []
+view = "Échelle"
+help = "Deux points [x,y] dans la VIS d'origine."
+unit = "px VIS"
+
+[[parameters]]
+key = "scale.segment_length_mm"
+label = "Longueur du segment"
+type = "float"
+default = 0.0
+view = "Échelle"
+help = "Longueur physique connue entre les deux points."
+unit = "mm"
+minimum = 0
+
+[[parameters]]
+key = "time.visible_source"
+label = "Source des temps VIS"
+type = "string"
+default = "filename"
+view = "Réglages DIC"
+help = "Numéros du nom de fichier ou horodatages des métadonnées."
+group = "Temps VIS"
+choices = ["filename", "metadata"]
+
+[[parameters]]
+key = "time.visible_frame_regex"
+label = "Expression VIS"
+type = "string"
+default = "(\\d+)"
+view = "Réglages DIC"
+help = "Capture le numéro d'acquisition dans le nom de fichier."
+group = "Temps VIS"
+
+[[parameters]]
+key = "time.visible_fps"
+label = "Cadence VIS"
+type = "float"
+default = 10.0
+view = "Synchro"
+help = "Convertit les numéros d'image en secondes."
+view_dic = "Réglages DIC"
+unit = "Hz"
+minimum = 0
+
+[[parameters]]
+key = "output.export_vtu"
+label = "Exporter VTU"
+type = "boolean"
+default = true
+view = "Export"
+help = "Un fichier de champs par temps VIS."
+
+[[parameters]]
+key = "output.export_pvd"
+label = "Exporter PVD"
+type = "boolean"
+default = true
+view = "Export"
+help = "Série ParaView datée par les temps VIS ; exige VTU."
+
+[[parameters]]
+key = "output.save_npz"
+label = "Conserver les résultats DIC"
+type = "boolean"
+default = true
+view = "Export"
+help = "Conserve le magasin DIC par image et ses chemins sources pour la reprise ; archive globale sur demande."
+readonly = true
+
+[[parameters]]
+key = "output.export_png"
+label = "Exporter PNG"
+type = "boolean"
+default = false
+view = "Export"
+help = "Figures par image, qui augmentent le volume du run."
+
+[[parameters]]
+key = "output.compute_residual_map"
+label = "Cartes de résidu"
+type = "boolean"
+default = false
+view = "Export"
+help = "Calcule une carte photométrique par image VIS ; augmente le volume du magasin DIC."
+
+[[parameters]]
+key = "output.paraview_length_unit"
+label = "Unité de longueur"
+type = "string"
+default = "px"
+view = "Export"
+help = "mm exige une échelle confirmée ; coordonnées et déplacements changent ensemble."
+choices = ["px", "mm"]
+
+[[parameters]]
+key = "output.series_name"
+label = "Nom de série"
+type = "string"
+default = "dic"
+view = "Export"
+help = "Nom de base des fichiers VTU/PVD."
+
+[[parameters]]
+key = "runtime.jax_preferred"
+label = "Dispositif préféré"
+type = "string"
+default = "gpu"
+view = "Réglages DIC"
+help = "Dispositif JAX demandé pour le processus de calcul."
+group = "Calcul JAX"
+choices = ["gpu", "cpu"]
+
+[[parameters]]
+key = "runtime.jax_fallback"
+label = "Dispositif de repli"
+type = "string"
+default = "cpu"
+view = "Réglages DIC"
+help = "Utilisé si le dispositif préféré est indisponible."
+group = "Calcul JAX"
+choices = ["cpu", "gpu"]
+
+[[parameters]]
+key = "runtime.jax_enable_x64"
+label = "Précision 64 bits"
+type = "boolean"
+default = false
+view = "Réglages DIC"
+help = "Active les flottants 64 bits avant l'initialisation JAX."
+group = "Calcul JAX"
+
+[[parameters]]
+key = "thermal.image_dir"
+label = "Dossier TH"
+type = "directory"
+default = ""
+view = "Thermique"
+help = "Dossier des TIFF contenant déjà des températures."
+picker = "directory"
+
+[[parameters]]
+key = "thermal.image_pattern"
+label = "Motif TH"
+type = "string"
+default = "*.tif"
+view = "Thermique"
+help = "Motif des acquisitions thermiques."
+
+[[parameters]]
+key = "thermal.unit"
+label = "Unité TH"
+type = "string"
+default = "degC"
+view = "Thermique"
+help = "Unité physique des valeurs TIFF ; aucune correction radiométrique."
+
+[[parameters]]
+key = "thermal.time_source"
+label = "Source des temps TH"
+type = "string"
+default = "filename"
+view = "Thermique"
+help = "Numéros du nom ou horodatages des métadonnées."
+choices = ["filename", "metadata"]
+
+[[parameters]]
+key = "thermal.frame_regex"
+label = "Expression TH"
+type = "string"
+default = "(\\d+)"
+view = "Thermique"
+help = "Capture le numéro d'acquisition thermique."
+
+[[parameters]]
+key = "thermal.thermal_fps"
+label = "Cadence TH"
+type = "float"
+default = 50.0
+view = "Synchro"
+help = "Convertit les numéros TH en secondes ; souvent 50 Hz."
+unit = "Hz"
+minimum = 0
+
+[[parameters]]
+key = "thermal.excluded_images"
+label = "Images TH désactivées"
+type = "array"
+default = []
+view = "Thermique"
+help = "Noms des TIFF TH exclus de l'analyse et de toute interpolation."
+hidden = true
+
+[[parameters]]
+key = "registration.file"
+label = "Calibration"
+type = "file"
+default = "calibration/visible_thermal.json"
+view = "Thermique"
+help = "Transformation VIS vers TH issue de points homologues."
+picker = "registration"
+
+[[parameters]]
+key = "registration.approved"
+label = "Correspondance approuvée"
+type = "boolean"
+default = false
+view = "Thermique"
+help = "Validation manuelle liée au fichier exact et à ses dimensions."
+
+[[parameters]]
+key = "synchronization.method"
+label = "Alignement des horloges"
+type = "string"
+default = "timestamps"
+view = "Synchro"
+help = "Horodatages communs ou événement vu par les deux caméras."
+choices = ["timestamps", "event_frames"]
+
+[[parameters]]
+key = "synchronization.visible_event_frame"
+label = "Événement VIS"
+type = "integer"
+default = 0
+view = "Synchro"
+help = "Numéro de trame VIS de l'événement commun."
+minimum = 0
+
+[[parameters]]
+key = "synchronization.thermal_event_frame"
+label = "Événement TH"
+type = "integer"
+default = 0
+view = "Synchro"
+help = "Numéro de trame TH du même événement."
+minimum = 0
+
+[[parameters]]
+key = "synchronization.thermal_interpolation"
+label = "Interpolation TH"
+type = "string"
+default = "linear"
+view = "Synchro"
+help = "Interpolation linéaire des températures seulement."
+choices = ["linear"]
+
+[[parameters]]
+key = "synchronization.thermal_offset_s"
+label = "Décalage TH"
+type = "float"
+default = 0.0
+view = "Synchro"
+help = "Décalage explicite de l'horloge TH vers les temps VIS."
+unit = "s"
+
