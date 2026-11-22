@@ -1,6 +1,6 @@
 # D2IC_GUI — catalogue des paramètres et configuration d’étude
 
-`parameters.toml`, à côté de `schema.py`, décrit les paramètres de l’application. Il est lu au démarrage du serveur ; `/api/schema` fournit ses métadonnées au navigateur, qui génère le panneau de la vue active. Ce fichier est inclus dans le paquet Python et les constructions portables.
+`src/D2IC_GUI/parameters.toml`, à côté de `schema.py` dans le paquet source, décrit les paramètres de l’application. Il est lu au démarrage du serveur ; `/api/schema` fournit ses métadonnées au navigateur, qui génère le panneau de la vue active. Ce fichier est inclus dans le paquet Python et les constructions portables.
 
 Le `config.toml` de chaque **étude** conserve seulement ses valeurs. Les clés absentes reçoivent les défauts du catalogue. Les études existantes gardent leurs valeurs ; leurs clés, unités et défauts restent compatibles. Les réglages visuels (zoom, largeur des panneaux) restent dans le navigateur.
 

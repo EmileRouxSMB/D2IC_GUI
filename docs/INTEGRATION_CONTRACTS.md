@@ -4,7 +4,7 @@ Cette note décrit les échanges entre le GUI, D2IC et DICTHFusion. Les chemins 
 
 ## Références et fonctionnement courant
 
-- [README.md](README.md) : hypothèses et conventions scientifiques.
+- [README.md](../README.md) : hypothèses et conventions scientifiques.
 - [CONFIG_SCHEMA.md](CONFIG_SCHEMA.md) : catalogue des paramètres du GUI ; [SPEC_TECHNIQUE.md](SPEC_TECHNIQUE.md) : architecture et traduction vers D2IC.
 - [RESULT_MODEL.md](RESULT_MODEL.md) : source de référence pour le stockage courant, les dimensions, les unités, la reprise et les analyses des résultats.
 

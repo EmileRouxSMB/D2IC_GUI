@@ -1,7 +1,8 @@
 # Analyse ergonomique — 6 novembre 2026
 
-Analyse fondée sur `static/app.js`, `static/index.html`, `schema.py`,
-`server.py` et `SPEC_ERGONOMIE.md`. Les recommandations ci-dessous viennent
+Analyse fondée sur `src/D2IC_GUI/static/app.js`,
+`src/D2IC_GUI/static/index.html`, `src/D2IC_GUI/schema.py`,
+`src/D2IC_GUI/server.py` et `SPEC_ERGONOMIE.md`. Les recommandations ci-dessous viennent
 de la lecture du code ; leur présentation visuelle et leur utilité doivent
 être confirmées en navigateur avec une étude expérimentale.
 

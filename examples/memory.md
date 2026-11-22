@@ -29,3 +29,6 @@ temps en secondes, température en °C. La trame TH d'index 3, soit `0.3 s` à
 Installer NumPy et tifffile pour exécuter le générateur. Les TIFF thermiques
 contiennent des valeurs float32 directement en °C. La génération n'écrit que
 dans le dossier de sortie demandé.
+
+
+Le script de ce dossier est un lanceur ; le générateur importable réside dans `../src/D2IC_GUI/examples/generate_synthetic_study.py`. Après installation éditable, utiliser aussi `python -m D2IC_GUI.examples.generate_synthetic_study`.

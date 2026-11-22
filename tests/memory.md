@@ -23,7 +23,7 @@ Les déplacements et coordonnées sont en pixels VIS d’origine ; la températu
 
 ## Conventions
 
-Depuis la racine : `PYTHONPATH=D2IC/src:im_jax:. python -m pytest -q D2IC_GUI/tests`.
+Depuis la racine du workspace : `PYTHONPATH=D2IC_GUI/src:D2IC/src:im_jax python -m pytest -q D2IC_GUI/tests`.
 Pour le zoom : `node --test D2IC_GUI/tests/test_image_zoom.cjs`.
 
 ## Points d’attention

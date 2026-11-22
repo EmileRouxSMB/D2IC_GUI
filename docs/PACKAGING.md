@@ -12,8 +12,14 @@ Depuis la racine du workspace, sur une machine avec Python >= 3.12 :
 
 ```bash
 python -m pip install uv
-python D2IC_GUI/build_portable.py
+python -m pip install -e ./D2IC_GUI --no-deps
+python -m D2IC_GUI.build_portable
 ```
+
+La racine du workspace contient les dossiers `D2IC_GUI`, `D2IC`,
+`DICTHFusion` et `im_jax`. L’installation éditable sans dépendances rend le
+module de construction accessible ; le script assemble ensuite son propre
+environnement isolé.
 
 La construction télécharge Python et les dépendances. Elle ne modifie pas
 l’environnement scientifique existant : les installations sont réalisées
@@ -28,20 +34,20 @@ Sorties par défaut sous `dist/` :
 L’assemblage refuse d’écraser une sortie existante. Pour une autre livraison :
 
 ```bash
-python D2IC_GUI/build_portable.py --output /chemin/vers/livraisons --name D2IC_GUI-v2
+python -m D2IC_GUI.build_portable --output /chemin/vers/livraisons --name D2IC_GUI-v2
 ```
 
 Autres options :
 
 ```bash
 # Versions exactes d’un précédent paquet :
-python D2IC_GUI/build_portable.py --constraints /ancien/paquet/requirements.lock
+python -m D2IC_GUI.build_portable --constraints /ancien/paquet/requirements.lock
 
 # Dossier autonome sans compression :
-python D2IC_GUI/build_portable.py --no-archive
+python -m D2IC_GUI.build_portable --no-archive
 
 # Exécutable uv situé hors du PATH :
-python D2IC_GUI/build_portable.py --uv /chemin/vers/uv
+python -m D2IC_GUI.build_portable --uv /chemin/vers/uv
 ```
 
 Le premier assemblage résout les versions disponibles ; le fichier
@@ -54,7 +60,7 @@ conserver les mêmes sources et la même version de CPython (`--python 3.12.x`).
 ### Assembler un ZIP Windows depuis Linux ou macOS
 
 ```bash
-python D2IC_GUI/build_windows.py
+python -m D2IC_GUI.build_windows
 ```
 
 Ce second script télécharge un véritable CPython Windows x64 et résout les
@@ -102,6 +108,10 @@ Les sources des projets sont copiées temporairement. Leurs dépendances
 puis les quatre paquets sont construits et installés avec leurs dépendances.
 Les dépôts D2IC et DICTHFusion restent inchangés. Le `pyproject.toml` GUI est
 destiné à ce parcours d’assemblage avec les métadonnées scientifiques adaptées.
+Les modules d’exécution résident dans `src/D2IC_GUI/`. Pour les utiliser depuis
+le workspace, installer les paquets scientifiques et le GUI en mode éditable
+comme indiqué dans la commande de construction ; les lanceurs du paquet
+autonome continuent d’utiliser `python -m D2IC_GUI.desktop`.
 
 Les tests et caches Python sont retirés du runtime, ainsi que les en-têtes et
 archives statiques de développement CPython. La base terminfo, inutilisée par le GUI, est retirée pour éviter les collisions de noms différant seulement par la casse sur certains volumes. Les métadonnées et licences des

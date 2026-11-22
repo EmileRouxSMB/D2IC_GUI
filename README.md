@@ -4,7 +4,7 @@
 
 `D2IC_GUI` est le projet d'une interface graphique de calcul scientifique pour analyser des séquences d'images d'un essai mécanique. Deux parcours sont proposés dès l'ouverture : **DIC seule**, à partir des images visibles, et **DIC + thermique**, qui associe les champs cinématiques et thermiques aux mêmes points matériels et aux mêmes instants.
 
-L'interface prépare les données, pilote les calculs, contrôle leur qualité, visualise les champs et organise les exports. Elle doit réutiliser `D2IC` pour la DIC 2D par éléments finis avec JAX et `DICTHFusion` pour la correspondance VIS → TH et l'interpolation spatiale bilinéaire. L'interpolation temporelle TH est réalisée dans le GUI aux instants VIS. Le GUI local est implémenté avec un magasin de résultats D2IC par image, décrit dans [RESULT_MODEL.md](RESULT_MODEL.md). La [spécification technique](SPEC_TECHNIQUE.md) fixe les choix de la première application web et son format `config.toml`. La [spécification ergonomique](SPEC_ERGONOMIE.md) décrit la navigation gauche à icônes, repliée par défaut, la zone centrale d’images sans titre redondant et le panneau droit redimensionnable, avec les paramètres et leurs aides `(i)`.
+L'interface prépare les données, pilote les calculs, contrôle leur qualité, visualise les champs et organise les exports. Elle doit réutiliser `D2IC` pour la DIC 2D par éléments finis avec JAX et `DICTHFusion` pour la correspondance VIS → TH et l'interpolation spatiale bilinéaire. L'interpolation temporelle TH est réalisée dans le GUI aux instants VIS. Le GUI local est implémenté avec un magasin de résultats D2IC par image, décrit dans [RESULT_MODEL.md](docs/RESULT_MODEL.md). La [spécification technique](docs/SPEC_TECHNIQUE.md) fixe les choix de la première application web et son format `config.toml`. La [spécification ergonomique](docs/SPEC_ERGONOMIE.md) décrit la navigation gauche à icônes, repliée par défaut, la zone centrale d’images sans titre redondant et le panneau droit redimensionnable, avec les paramètres et leurs aides `(i)`.
 
 ## Dessiner une ROI
 
@@ -13,21 +13,26 @@ Dans **ROI / maillage**, choisir **Rectangle** ou **Ellipse**, puis glisser sur 
 ## Installation et démarrage
 
 Pour créer une **distribution autonome CPU avec OpenCV headless** et Python
-embarqué, voir [PACKAGING.md](PACKAGING.md). Depuis la racine :
-`python -m pip install uv`, puis `python D2IC_GUI/build_portable.py`.
+embarqué, voir [PACKAGING.md](docs/PACKAGING.md). Depuis la racine :
+installer `uv` et le paquet GUI en mode éditable, puis lancer
+`python -m D2IC_GUI.build_portable`.
 Le script produit un dossier et une archive sous `dist/`, pour le système
 sur lequel il est exécuté.
 
-Depuis la racine du dépôt, avec Python 3.12 et un environnement où JAX est disponible :
+Depuis la racine du workspace parent contenant `im_jax`, `D2IC`,
+`DICTHFusion` et `D2IC_GUI`, avec Python 3.12 :
 
 ```bash
-python -m pip install -e ./im_jax -e ./D2IC -e ./DICTHFusion fastapi uvicorn tomli-w tifffile pillow
+python -m pip install -e ./im_jax -e ./D2IC -e ./DICTHFusion -e ./D2IC_GUI
 python -m D2IC_GUI
 ```
 
+Cette commande installe les quatre paquets en mode éditable. Les dépendances du GUI sont déclarées dans
+`D2IC_GUI/pyproject.toml`.
+
 Ouvrir `http://127.0.0.1:8765` dans le navigateur. Pour rouvrir directement une étude, lancer `python -m D2IC_GUI /chemin/vers/etude`. Le menu **Fichier** regroupe **Nouvelle étude**, **Ouvrir**, **Enregistrer**, **Enregistrer sous**, **Dupliquer l’étude** et **Relocaliser les images**. Pour ouvrir une étude, sélectionner son dossier ou son fichier `config.toml` dans l’explorateur ; un double clic sur le dossier l’ouvre aussi. La zone centrale est sans trame décorative ni marge inutile ; images VIS/TH, ROI et cartes de résultats utilisent au maximum la surface disponible. Le bandeau supérieur est compact ; le nom de l’étude, son état et le parcours restent visibles. **Enregistrer sous** crée une nouvelle étude à partir des réglages courants sans modifier l’originale ; **Dupliquer** crée aussi une copie avec un nom proposé. Dans VIS, chaque image de la séquence peut être activée ou désactivée pour l’analyse. Les commandes permettent de tout activer, de retenir une image sur N, ou de désélectionner les images avant ou après l’image I (index affiché dans la table). La référence reste active. Les exclusions sont enregistrées dans `config.toml` ; chaque run fige les chemins absolus des images effectivement analysées, sans copie des sources. Tous les paramètres scientifiques sont dans le panneau droit et sont sauvegardés dans `config.toml` ; les images VIS et TH restent à leur emplacement. Les exemples de configuration et un générateur de petites séquences sont dans [examples](examples/README.md).
 
-Le GUI affiche la progression de D2IC dans Job Manager, puis les cartes et historiques dans Résultats. La carte est entièrement visible ; plusieurs nœuds peuvent être ajoutés par clic et retirés par Maj + clic. Les champs cinématiques acceptent des bornes de couleur manuelles ou calculées sur l’image courante ou toute la séquence. Les moyennes thermiques élémentaires sont affichées par cellule, avec les cellules invalides masquées. Les chemins des exports ParaView restent accessibles dans Export. L'onglet **Export** permet de créer une archive NPZ globale seulement si elle est nécessaire à un autre outil. Les nouveaux runs utilisent le [magasin de résultats par image](RESULT_MODEL.md), avec reprise après interruption. Pour les conventions et limites physiques, lire les sections ci-dessous.
+Le GUI affiche la progression de D2IC dans Job Manager, puis les cartes et historiques dans Résultats. La carte est entièrement visible ; plusieurs nœuds peuvent être ajoutés par clic et retirés par Maj + clic. Les champs cinématiques acceptent des bornes de couleur manuelles ou calculées sur l’image courante ou toute la séquence. Les moyennes thermiques élémentaires sont affichées par cellule, avec les cellules invalides masquées. Les chemins des exports ParaView restent accessibles dans Export. L'onglet **Export** permet de créer une archive NPZ globale seulement si elle est nécessaire à un autre outil. Les nouveaux runs utilisent le [magasin de résultats par image](docs/RESULT_MODEL.md), avec reprise après interruption. Pour les conventions et limites physiques, lire les sections ci-dessous.
 
 Les images VIS, TH, ROI, Synchro, Échelle, correspondance et Résultats proposent un zoom par rectangle : activer **Zoom**, puis cliquer pour agrandir autour du pointeur, ou maintenir le clic gauche et tracer la fenêtre souhaitée. **Ctrl + clic** (ou Cmd + clic) dézoome autour du pointeur ; **Réinitialiser la vue** retrouve le cadrage complet. Dans les vues de mesure et de résultats, désactiver **Zoom** pour placer les points ou sélectionner les nœuds. Le grossissement affiché dans chaque cadre est relatif à son cadrage initial. Le zoom reste un réglage d’affichage : les coordonnées physiques et les calques ROI, photométrie et maillage restent alignés. Le retrait d’un nœud sélectionné se fait par **Maj + clic**.
 
@@ -35,7 +40,7 @@ Les images VIS, TH, ROI, Synchro, Échelle, correspondance et Résultats propose
 
 Le zoom affiche les pixels sources sans lissage du navigateur, y compris les calques ROI, photométrie et maillage. Les images VIS/TH sont chargées à leur résolution native. Ce mode d’affichage ne change pas le choix d’interpolation du solveur DIC.
 
-Dans **ROI / maillage**, **Érosion photométrique** (`dic.roi_erosion_px`) exclut une bande autour des bords et des trous du masque pour le seul critère photométrique. Le rayon est exprimé en pixels VIS d’origine, même avec binning. Saisir `3.0` reproduit le réglage d’`IdentVirual/sequential_dic.toml` ; `0.0`, le défaut, désactive l’érosion. Enregistrer avant de lancer un nouveau run. Le masque géométrique, les nœuds et les éléments restent inchangés ; aucun remaillage n’est nécessaire pour modifier ce rayon. L’aperçu superpose la ROI géométrique en vert et les pixels photométriques retenus en bleu : la bande exclue reste visible entre leurs contours. Les cases ROI, Photométrie et Maillage commandent chaque calque séparément. Modifier le rayon actualise le calque bleu avant sauvegarde, sans régénérer le maillage. Les propositions d’ergonomie générale sont dans [l’analyse ergonomique](ERGONOMIE_REVIEW.md).
+Dans **ROI / maillage**, **Érosion photométrique** (`dic.roi_erosion_px`) exclut une bande autour des bords et des trous du masque pour le seul critère photométrique. Le rayon est exprimé en pixels VIS d’origine, même avec binning. Saisir `3.0` reproduit le réglage d’`IdentVirual/sequential_dic.toml` ; `0.0`, le défaut, désactive l’érosion. Enregistrer avant de lancer un nouveau run. Le masque géométrique, les nœuds et les éléments restent inchangés ; aucun remaillage n’est nécessaire pour modifier ce rayon. L’aperçu superpose la ROI géométrique en vert et les pixels photométriques retenus en bleu : la bande exclue reste visible entre leurs contours. Les cases ROI, Photométrie et Maillage commandent chaque calque séparément. Modifier le rayon actualise le calque bleu avant sauvegarde, sans régénérer le maillage. Les propositions d’ergonomie générale sont dans [l’analyse ergonomique](docs/ERGONOMIE_REVIEW.md).
 
 L’interface comprend un explorateur local pour choisir les dossiers VIS et TH, l’image de référence, les masques ROI, la calibration et le dossier des runs. Il sert aussi à créer, ouvrir, copier ou relocaliser une étude. La recherche porte sur le dossier affiché et les listes volumineuses sont paginées. Les chemins choisis sont enregistrés dans config.toml après validation ; choisir une référence VIS renseigne aussi son dossier. Les images sources restent à leur emplacement.
 
@@ -47,7 +52,7 @@ Dans l’onglet VIS, seuls le dossier des images, la série et la référence so
 
 Chaque nouveau run reçoit un identifiant et un dossier `YY-MM-DD-Id` (date UTC, par exemple `26-10-17-001`), incrémentés dans la journée. Les anciens runs restent accessibles sous leur ancien nom. Dans **Job Manager**, **Préparer le job** crée une ligne avec les erreurs et avertissements détectés. **Lancer** est disponible sur cette ligne dès que la préparation ne comporte aucune erreur ; les avertissements ne bloquent pas. Le job conserve les réglages et sources figés lors de sa préparation. Après correction d’une erreur dans l’étude, préparer un nouveau job. Les commandes **Lancer**, **Stop**, **Redémarrer**, **Supprimer** et **Résultats** sont regroupées sur la ligne ; les résultats deviennent accessibles pendant le calcul dès qu’ils sont disponibles. Sélectionner une ligne affiche son état et sa progression en haut. La suppression demande une confirmation et ne concerne que le dossier de ce run ; les images sources restent en place. Les parcours DIC seule et DIC + thermique sont opérationnels sur les séquences synthétiques fournies : configuration TOML, ROI et maillage, correspondance manuellement approuvée, calcul D2IC, cartes et historiques, exports VTU/PVD. Les fichiers ParaView sont produits pendant le run selon `[output]` ; l'onglet Export affiche leurs chemins et peut créer le NPZ global de compatibilité. La sélection individuelle des champs VTU après un run n'est pas encore proposée. Les cartes de résidu photométrique sont facultatives (`output.compute_residual_map=false` par défaut) car elles augmentent le volume du magasin.
 
-Les tests couvrent le rejeu numérique des deux parcours et les principales frontières de données. Une validation visuelle en navigateur sur écran étroit, les scénarios d'annulation/erreur disque en situation réelle et la mesure de performance sur une longue séquence expérimentale restent à effectuer ; ils figurent dans [ROADMAP_DEV.md](ROADMAP_DEV.md).
+Les tests couvrent le rejeu numérique des deux parcours et les principales frontières de données. Une validation visuelle en navigateur sur écran étroit, les scénarios d'annulation/erreur disque en situation réelle et la mesure de performance sur une longue séquence expérimentale restent à effectuer ; ils figurent dans [ROADMAP_DEV.md](docs/ROADMAP_DEV.md).
 
 ## Modèle et grandeurs
 
@@ -157,9 +162,26 @@ Le parcours DIC seul doit retrouver une translation rigide connue sans déformat
 
 ## Développement du GUI
 
-La [feuille de route](ROADMAP_DEV.md) suit les jalons et leurs preuves de validation. Le [routage des tâches de recherche](../.agents/skills/research-task-routing/SKILL.md) distingue implémentation locale et décision scientifique ou architecturale. Les rôles disponibles sont définis dans [`../.codex/agents/`](../.codex/agents/) ; leur configuration fait autorité pour les modèles employés.
+La [feuille de route](docs/ROADMAP_DEV.md) suit les jalons et leurs preuves de validation. Le [routage des tâches de recherche](../.agents/skills/research-task-routing/SKILL.md) distingue implémentation locale et décision scientifique ou architecturale. Les rôles disponibles sont définis dans [`../.codex/agents/`](../.codex/agents/) ; leur configuration fait autorité pour les modèles employés.
 
 Le worker charge le paquet local `im_jax` avant D2IC quand le dépôt source est utilisé : l’interpolation VIS cubique par défaut reste disponible même si le paquet n’est pas installé en mode éditable. Un run échoué pour cette raison peut être relancé avec **Redémarrer** depuis Job Manager ; sa configuration figée est conservée.
 
 
-Les paramètres et les contrôles du panneau sont définis dans [`parameters.toml`](parameters.toml). Voir [`CONFIG_SCHEMA.md`](CONFIG_SCHEMA.md) pour ajouter une entrée (nom, clé, type, défaut, choix, aide, onglet), puis redémarrer le GUI. Les valeurs propres à chaque étude restent dans son `config.toml`.
+Les paramètres et les contrôles du panneau sont définis dans [`parameters.toml`](src/D2IC_GUI/parameters.toml). Voir [`CONFIG_SCHEMA.md`](docs/CONFIG_SCHEMA.md) pour ajouter une entrée (nom, clé, type, défaut, choix, aide, onglet), puis redémarrer le GUI. Les valeurs propres à chaque étude restent dans son `config.toml`.
+
+## Structure du module
+
+```text
+D2IC_GUI/
+├── src/D2IC_GUI/       paquet Python et actifs de l’interface
+│   ├── examples/       générateur d’étude synthétique importable
+│   └── static/         HTML, CSS et JavaScript
+├── docs/               définition scientifique, spécifications et contrats
+├── tests/              tests Python et JavaScript
+├── examples/           configurations et générateur de compatibilité
+├── pyproject.toml
+└── README.md
+```
+
+Les commandes de construction sont des modules du paquet :
+`python -m D2IC_GUI.build_portable` ou `python -m D2IC_GUI.build_windows`.

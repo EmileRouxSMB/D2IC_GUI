@@ -1,6 +1,6 @@
 # D2IC_GUI — spécification ergonomique de l'application web locale
 
-**Statut :** spécification de conception, GUI non implémentée. Ce document définit l'expérience utilisateur. La [définition scientifique](README.md) fixe les grandeurs et hypothèses ; la [spécification technique](SPEC_TECHNIQUE.md) fixe l'architecture et le format `config.toml`. En cas de divergence sur un calcul, la définition scientifique fait foi.
+**Statut :** spécification de conception, GUI non implémentée. Ce document définit l'expérience utilisateur. La [définition scientifique](../README.md) fixe les grandeurs et hypothèses ; la [spécification technique](SPEC_TECHNIQUE.md) fixe l'architecture et le format `config.toml`. En cas de divergence sur un calcul, la définition scientifique fait foi.
 
 ## 1. Objectif et utilisateurs
 

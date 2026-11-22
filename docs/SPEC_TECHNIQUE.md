@@ -1,6 +1,6 @@
 # D2IC_GUI — spécification technique de la première application web
 
-**Statut :** spécification de référence de l’application locale. **Référence scientifique :** [README.md](README.md). Ce document décrit les contrats attendus ; l’état de livraison et les limites de validation sont suivis dans [ROADMAP_DEV.md](ROADMAP_DEV.md). Le stockage courant est défini dans [RESULT_MODEL.md](RESULT_MODEL.md).
+**Statut :** spécification de référence de l’application locale. **Référence scientifique :** [README.md](../README.md). Ce document décrit les contrats attendus ; l’état de livraison et les limites de validation sont suivis dans [ROADMAP_DEV.md](ROADMAP_DEV.md). Le stockage courant est défini dans [RESULT_MODEL.md](RESULT_MODEL.md).
 
 ## 1. Périmètre et architecture
 
@@ -235,8 +235,8 @@ La version DIC est acceptée quand un projet `config.toml` suffit à reproduire 
 
 ## Sources des choix techniques
 
-- [Configuration actuelle de D2IC](../D2IC/src/d2ic/io/config.py) et [exemple TOML](../D2IC/examples/configs/sequential_dic.toml) : paramètres et conventions existants.
-- [Export ParaView actuel](../D2IC/src/d2ic/io/paraview.py) : champs DIC nodaux, VTU et PVD.
+- [Configuration actuelle de D2IC](../../D2IC/src/d2ic/io/config.py) et [exemple TOML](../../D2IC/examples/configs/sequential_dic.toml) : paramètres et conventions existants.
+- [Export ParaView actuel](../../D2IC/src/d2ic/io/paraview.py) : champs DIC nodaux, VTU et PVD.
 - [Documentation FastAPI — templates](https://fastapi.tiangolo.com/advanced/templates/) et [tâches d'arrière-plan](https://fastapi.tiangolo.com/tutorial/background-tasks/) : base du serveur local et séparation du calcul lourd.
 - [Documentation Python — `tomllib`](https://docs.python.org/3/library/tomllib.html) : lecture TOML uniquement ; l'écriture demande un outil distinct.
 

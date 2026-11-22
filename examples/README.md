@@ -1,10 +1,14 @@
 # Exemple synthétique VIS + TH
 
-Depuis la racine du dépôt, exécuter :
+Après l’installation éditable décrite dans le [README](../README.md#installation-et-démarrage),
+le générateur est accessible depuis n’importe quel dossier :
 
 ```bash
-python D2IC_GUI/examples/generate_synthetic_study.py /tmp/d2ic_gui_synthetic
+python -m D2IC_GUI.examples.generate_synthetic_study /tmp/d2ic_gui_synthetic
 ```
+
+Le lanceur `examples/generate_synthetic_study.py`, à la racine du dépôt,
+reste disponible et appelle le même générateur empaqueté.
 
 Le script écrit deux séquences TIFF et `expected.json` dans le dossier donné. Il
 ne modifie aucune image existante. Il ne faut pas interpréter les images de cette
