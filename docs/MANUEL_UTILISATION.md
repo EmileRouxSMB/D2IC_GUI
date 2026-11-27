@@ -4,7 +4,7 @@ Installation et lancement : [README](../README.md#installation). Exemple prêt �
 
 ## 1. Créer ou ouvrir une étude
 
-Dans **Fichier**, créer une étude ou ouvrir son dossier / `config.toml`. Choisir **DIC seule** ou **DIC + thermique**. Le panneau droit contient les paramètres et leurs aides `(i)` ; **Enregistrer** conserve les réglages dans `config.toml`.
+Au démarrage sans étude, choisir **Créer une étude** ou **Ouvrir une étude** et sélectionner son dossier / `config.toml`. L’espace de travail reste bloqué tant qu’une étude n’est pas créée ou ouverte ; annuler le choix du dossier revient à cet écran. Une étude fournie au lancement s’ouvre directement. Pour changer ensuite d’étude, utiliser **Fichier**. Choisir **DIC seule** ou **DIC + thermique**. Le panneau droit contient les paramètres et leurs aides `(i)` ; **Enregistrer** conserve les réglages dans `config.toml`.
 
 **Enregistrer sous** et **Dupliquer** créent une autre étude avec les petits actifs nécessaires, sans modifier l’originale ni copier les séquences. **Relocaliser les images** met à jour leurs dossiers après vérification ; les anciens runs conservent leurs chemins historiques.
 
