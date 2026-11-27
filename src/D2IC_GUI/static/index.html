@@ -10,10 +10,10 @@
   <script src="/static/roi_mesh.js?v=20261111-vector-mesh" defer></script>
   <script src="/static/roi_shapes.js?v=result-overlay-1" defer></script>
   <script src="/static/result_analysis.js?v=20261121-audit" defer></script>
-  <script src="/static/app.js?v=20261121-audit" defer></script>
+  <script src="/static/app.js?v=20261127-study-required" defer></script>
 </head>
 <body class="nav-collapsed">
-  <header class="topbar">
+  <header class="topbar" inert>
     <a class="brand" href="#" aria-label="D2IC accueil"><span class="brand-mark">D</span><span>D2IC</span></a>
     <div class="file-menu">
       <button type="button" id="file-menu-trigger" class="file-menu-trigger" aria-controls="file-menu-panel" aria-expanded="false" aria-haspopup="true">Fichier <span aria-hidden="true">⌄</span></button>
@@ -31,7 +31,7 @@
     <div class="project-head"><strong id="project-name">Nouvelle étude</strong><span id="save-state" class="save-state"><i></i>Connexion…</span><div class="mode-row"><label for="project-mode">Parcours</label><select id="project-mode"><option value="dic">DIC seule</option><option value="dic_thermal">DIC + thermique</option></select></div></div>
     <div class="top-actions"><button class="icon-button recent-button" id="recent-runs" title="Runs récents" aria-label="Runs récents">◷</button><button class="icon-button mobile-nav" id="nav-toggle" title="Navigation" aria-label="Ouvrir la navigation">☰</button></div>
   </header>
-  <div class="app-shell">
+  <div class="app-shell" inert>
     <aside class="sidebar" id="sidebar" aria-label="Vues scientifiques">
       <div class="sidebar-top"><button class="collapse-nav" id="collapse-nav" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Développer la navigation" title="Développer la navigation">‹</button><span>Navigation</span></div>
       <div class="nav-caption">ÉTUDE</div>
@@ -68,6 +68,17 @@
     </main>
   </div>
   <div class="scrim" id="scrim"></div>
+  <dialog id="study-dialog" aria-labelledby="study-dialog-title" aria-describedby="study-dialog-copy">
+    <div class="eyebrow">D2IC · ÉTUDE LOCALE</div>
+    <h2 id="study-dialog-title">Ouvrir ou créer une étude</h2>
+    <p id="study-dialog-copy">Choisissez une étude pour accéder aux images, au dessin ROI et aux calculs.</p>
+    <p id="study-startup-status" role="status">Connexion au serveur local…</p>
+    <div class="file-dialog-actions">
+      <button type="button" class="button outline" id="startup-open-study" disabled>Ouvrir une étude</button>
+      <button type="button" class="button primary" id="startup-new-study" disabled>Créer une étude</button>
+      <button type="button" class="button outline" id="startup-retry" hidden>Réessayer</button>
+    </div>
+  </dialog>
   <dialog id="file-dialog" aria-labelledby="file-dialog-title">
     <div class="file-dialog-head"><div><div class="eyebrow">FICHIERS LOCAUX</div><h2 id="file-dialog-title">Choisir un fichier</h2></div><button type="button" class="dialog-close" id="file-close" aria-label="Fermer">×</button></div>
     <div class="file-path-row"><button type="button" class="button outline" id="file-up" title="Dossier parent" aria-label="Dossier parent">↑</button><input id="file-path" type="text" aria-label="Chemin du dossier"><button type="button" class="button outline" id="file-go">Aller</button></div>

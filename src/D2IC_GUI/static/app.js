@@ -16,6 +16,22 @@
   };
   const groups = { VIS: 'Images VIS', ROI: 'ROI / maillage', Échelle: 'Échelle', 'Réglages DIC': 'Réglages DIC', Thermique: 'Thermique', Synchro: 'Synchro', 'Job Manager': 'Job Manager', Résultats: 'Résultats', Export: 'Export' };
 
+  const studyDialog = $('#study-dialog');
+  studyDialog.addEventListener('cancel', event => event.preventDefault());
+  function updateStudyAccess() {
+    const hasStudy = Boolean(state.project.folder);
+    $('.topbar').inert = !hasStudy;
+    $('.app-shell').inert = !hasStudy;
+    if (hasStudy) {
+      if (studyDialog.open) studyDialog.close();
+    } else {
+      if (!studyDialog.open) studyDialog.showModal();
+      $('#study-startup-status').textContent = 'Une étude est nécessaire pour commencer.';
+      $('#startup-open-study').disabled = false;
+      $('#startup-new-study').disabled = false;
+    }
+  }
+
   function setDirty(dirty = true) {
     state.dirty = dirty;
     scheduleReadiness();
@@ -445,17 +461,23 @@
     if (!state.config.project) state.config.project = { mode: 'dic', name: 'Nouvelle étude' };
     $('#project-name').textContent = payload.name || state.config.project.name || 'Nouvelle étude';
     $('#project-mode').value = state.config.project.mode || 'dic';
+    updateStudyAccess();
   }
   async function load() {
     try {
       const [schema, project] = await Promise.all([api('/api/schema'), api('/api/project')]);
-      state.schema = schema; normalizeProject(project); renderFields(); setDirty(false);
+      state.schema = schema; normalizeProject(project);
+      if (state.project.folder) { renderFields(); setDirty(false); }
+      $('#startup-retry').hidden = true;
     } catch (error) {
+      $('#study-startup-status').textContent = 'Connexion impossible : ' + error.message;
+      $('#startup-retry').hidden = false;
       setError('Serveur indisponible');
       $('#field-groups').innerHTML = `<div class="loading-state">Impossible de charger le projet : ${htmlEscape(error.message)}.<br><br>Vérifiez que le serveur D2IC local est démarré.</div>`;
     }
   }
   async function save() {
+    if (!state.project.folder) return false;
     try {
       const result = await api('/api/project/config', { method: 'PUT', body: JSON.stringify(state.config) });
       if (result.config) state.config = result.config;
@@ -468,6 +490,7 @@
     } catch (error) { setError('Erreur de sauvegarde'); $('#config-message').textContent = error.message; return false; }
   }
   function selectView(view) {
+    if (!state.project.folder) return;
     if (view !== 'ROI') { roiEditor?.destroy(); roiEditor = null; }
     state.view = view;
     if (view !== 'Échelle') scaleResizeObserver?.disconnect();
@@ -1146,9 +1169,10 @@
   function scheduleReadiness() {
     clearTimeout(readinessTimer); ++readinessRevision;
     applyReadiness(null);
-    if (state.config.project) readinessTimer = setTimeout(refreshReadiness, 350);
+    if (state.project.folder) readinessTimer = setTimeout(refreshReadiness, 350);
   }
   async function refreshReadiness() {
+    if (!state.project.folder) return null;
     clearTimeout(readinessTimer);
     const revision = ++readinessRevision, project = state.projectKey;
     const config = JSON.stringify(state.config);
@@ -1890,7 +1914,7 @@
     $('#export-run').addEventListener('click',()=>show(false));
     $('#export-npz').addEventListener('click',()=>show(true));
   }
-  async function loadViewContent(view){if(['Thermique','Synchro'].includes(view)&&state.config.project?.mode!=='dic_thermal'){setStage('<div class="empty-visual"><h2>Étape inactive</h2><p>Choisissez le parcours DIC + thermique pour préparer les images TH et leur synchronisation.</p></div>');return;}if(view==='VIS')return loadVisible();if(view==='Thermique')return loadThermal();if(view==='ROI')return loadROI();if(view==='Synchro')return loadSynchronization();if(view==='Job Manager')return loadJobManager();if(view==='Résultats')return loadResults();if(view==='Échelle')return loadDicView();if(view==='Réglages DIC')return loadDicSettingsView();if(view==='Export')return loadExportView();}
+  async function loadViewContent(view){if(!state.project.folder)return;if(['Thermique','Synchro'].includes(view)&&state.config.project?.mode!=='dic_thermal'){setStage('<div class="empty-visual"><h2>Étape inactive</h2><p>Choisissez le parcours DIC + thermique pour préparer les images TH et leur synchronisation.</p></div>');return;}if(view==='VIS')return loadVisible();if(view==='Thermique')return loadThermal();if(view==='ROI')return loadROI();if(view==='Synchro')return loadSynchronization();if(view==='Job Manager')return loadJobManager();if(view==='Résultats')return loadResults();if(view==='Échelle')return loadDicView();if(view==='Réglages DIC')return loadDicSettingsView();if(view==='Export')return loadExportView();}
 
   let applyWorkspaceColumns = null;
   function setSettingsExpanded(expanded) {
@@ -1968,16 +1992,46 @@
     setSettingsExpanded(document.body.classList.contains('settings-collapsed')));
   $('#scrim').addEventListener('click', () => document.body.classList.remove('nav-open'));
   $('#choose-images').addEventListener('click', () => browseField('paths.visible_dir'));
-  async function switchProject(route, payload) { try { const result = await api(route,{method:'POST',body:JSON.stringify(payload)}); normalizeProject(result); renderFields(); setDirty(false); selectView('VIS'); $('#config-message').textContent = 'Étude ouverte : ' + result.folder; } catch(e) { notify('Action impossible',e.message); } }
-  $('#new-study').addEventListener('click', async () => {
-    const parent = state.project.folder ? state.project.folder.slice(0, state.project.folder.lastIndexOf('/')) || '/' : '';
-    const folder = await openExplorer({ mode: 'new_directory', kind: 'directory', title: 'Nouvelle étude', initialPath: parent, suggestedName: 'nouvelle_etude' });
-    if (folder) switchProject('/api/project/new', { folder, name: folder.split('/').pop(), mode: state.config.project?.mode || 'dic' });
-  });
-  $('#open-study').addEventListener('click', async () => {
-    const parent = state.project.folder ? state.project.folder.slice(0, state.project.folder.lastIndexOf('/')) || '/' : '';
-    const folder = await openExplorer({ mode: 'study', kind: 'study', title: 'Ouvrir une étude', initialPath: parent });
-    if (folder) switchProject('/api/project/open', { folder });
+  async function switchProject(route, payload) {
+    try {
+      const result = await api(route, {method: 'POST', body: JSON.stringify(payload)});
+      normalizeProject(result); renderFields(); setDirty(false); selectView('VIS');
+      $('#config-message').textContent = 'Étude ouverte : ' + result.folder;
+    } catch (error) {
+      if (!state.project.folder) $('#study-startup-status').textContent = 'Action impossible : ' + error.message;
+      else notify('Action impossible', error.message);
+    }
+  }
+  function studyParent() {
+    const folder = (state.project.folder || '').replace(/\\/g, '/');
+    return folder ? folder.slice(0, folder.lastIndexOf('/')) + '/' : '';
+  }
+  async function chooseStudy(create) {
+    const folder = await openExplorer(create
+      ? { mode: 'new_directory', kind: 'directory', title: 'Nouvelle étude', initialPath: studyParent(), suggestedName: 'nouvelle_etude' }
+      : { mode: 'study', kind: 'study', title: 'Ouvrir une étude', initialPath: studyParent() });
+    if (!folder) return;
+    await switchProject(create ? '/api/project/new' : '/api/project/open', create
+      ? { folder, name: folder.replace(/\\/g, '/').split('/').pop(), mode: state.config.project?.mode || 'dic' }
+      : { folder });
+  }
+  $('#new-study').addEventListener('click', () => chooseStudy(true));
+  $('#open-study').addEventListener('click', () => chooseStudy(false));
+  async function startupChooseStudy(create) {
+    $('#startup-open-study').disabled = true;
+    $('#startup-new-study').disabled = true;
+    try { await chooseStudy(create); }
+    finally {
+      $('#startup-open-study').disabled = false;
+      $('#startup-new-study').disabled = false;
+    }
+  }
+  $('#startup-new-study').addEventListener('click', () => startupChooseStudy(true));
+  $('#startup-open-study').addEventListener('click', () => startupChooseStudy(false));
+  $('#startup-retry').addEventListener('click', async () => {
+    $('#startup-retry').disabled = true;
+    try { await load(); await loadViewContent('VIS'); }
+    finally { $('#startup-retry').disabled = false; }
   });
   $('#save-as-study').addEventListener('click', async () => {
     if (!state.project.folder) { notify('Enregistrer sous', 'Créez d’abord une étude.'); return; }
@@ -2009,5 +2063,6 @@
   $('#recent-runs').addEventListener('click', () => selectView('Job Manager'));
   $('#project-mode').addEventListener('change', () => { state.config.project.mode=$('#project-mode').value; renderFields(); setDirty(); if(state.view==='Thermique'||state.view==='Synchro')state.view='VIS'; selectView(state.view); });
   new MutationObserver(setupImageViews).observe($('#stage-content'), { childList: true, subtree: true });
+  studyDialog.showModal();
   setupSplitter(); load().then(()=>loadViewContent('VIS'));
 })();
