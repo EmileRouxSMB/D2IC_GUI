@@ -21,6 +21,8 @@ Une distribution autonome CPU avec Python embarqué peut être construite : [gui
 
 ## Utilisation rapide
 
+Pour un premier calcul, suivre le [guide simple du GUI](docs/GUIDE_RAPIDE.md).
+
 1. Créer une étude dans **Fichier** et choisir **DIC seule** ou **DIC + thermique**.
 2. Sélectionner les images VIS, la référence et les temps d’acquisition.
 3. Importer ou dessiner la ROI, puis **Mailler** ; confirmer l’échelle pour les sorties en mm.
